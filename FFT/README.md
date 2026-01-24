@@ -111,7 +111,23 @@
 
 ## 技術規格
 
+### 硬體規格
+- **FPGA 晶片**：Altera Cyclone III EP3C40Q240
+- **開發工具**：Intel Quartus II
+- **FFT 點數**：256 點（固定）
+- **系統時鐘**：50 MHz
+- **資料寬度**：16-bit 固定點數
+
+### 軟體規格
+- **開發環境**：Visual Studio 2022
+- **框架版本**：.NET 6.0 (LTS) 或 .NET 7.0
+- **專案類型**：Windows Forms Application
+- **通訊介面**：RS-232 (115200 bps)
+
 詳細技術規格請參閱 [spec.md](spec.md)
+
+### VB.NET 開發指南
+完整的 VB.NET 開發建議、套件推薦和範例程式碼，請參閱 [VB.NET 開發指南](VB_NET_Development_Guide.md)
 
 ## 檔案結構
 
@@ -138,14 +154,21 @@ FFT/
 ## 開發環境
 
 ### FPGA 開發
-- **開發工具**：Xilinx Vivado / Intel Quartus
+- **開發工具**：Intel Quartus II
 - **語言**：VHDL
-- **目標晶片**：（待指定）
+- **目標晶片**：Altera Cyclone III EP3C40Q240
+- **系統時鐘**：50 MHz
 
 ### VB 開發
-- **開發工具**：Visual Studio / VB6
-- **語言**：Visual Basic
-- **.NET 版本**：（待指定）
+- **開發工具**：Visual Studio 2022
+- **語言**：Visual Basic .NET
+- **.NET 版本**：.NET 6.0 (LTS 推薦) 或 .NET 7.0
+- **專案類型**：Windows Forms Application
+
+### 推薦 NuGet 套件
+- **串列埠**：System.IO.Ports (v7.0+)
+- **圖表繪製**：ScottPlot.WinForms (v4.1+ 或 v5.0+)
+- **數學運算**：MathNet.Numerics (v5.0+，可選)
 
 ## 授權
 

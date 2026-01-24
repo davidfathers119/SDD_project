@@ -85,8 +85,8 @@
 ##### 泛型參數 (Generic)
 | 參數名稱 | 型別 | 預設值 | 說明 |
 |----------|------|--------|------|
-| FFT_SIZE | integer | 1024 | FFT 點數（64/128/256/512/1024） |
-| DATA_WIDTH | integer | 16 | 資料位元寬度 |
+| FFT_SIZE | integer | 256 | FFT 點數（本專案固定為 256） |
+| DATA_WIDTH | integer | 16 | 資料位元寬度（16-bit 固定點數） |
 | TWIDDLE_WIDTH | integer | 16 | 旋轉因子位元寬度 |
 
 ##### 連接埠 (Port)
@@ -217,24 +217,31 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 
 #### 模組：MainForm
 - **功能**：主要使用者介面與流程控制
+- **建議使用**：Windows Forms（易於串列埠控制）
 - **介面元件**：
-  - 波形顯示區（時域）
-  - 頻譜顯示區（頻域）
+  - 波形顯示區（時域）- 使用 OxyPlot 或 LiveCharts
+  - 頻譜顯示區（頻域）- 使用 OxyPlot 或 LiveCharts
   - 控制按鈕（產生波形、傳送、接收）
   - 參數設定區
   - 狀態顯示區
 
 #### 模組：RS232Comm
 - **功能**：RS-232 通訊處理
+- **建議使用**：System.IO.Ports.SerialPort 類別
 - **主要方法**：
   - `OpenPort()` - 開啟串列埠
   - `ClosePort()` - 關閉串列埠
   - `SendData(data As Byte())` - 傳送資料
   - `ReceiveData() As Byte()` - 接收資料
   - `ConfigPort(baudRate, dataBits, parity, stopBits)` - 設定通訊參數
+- **事件處理**：DataReceived 事件（非同步接收）
 
 #### 模組：PlotModule
 - **功能**：波形與頻譜繪圖
+- **推薦套件**：
+  - OxyPlot (NuGet: OxyPlot.WindowsForms)
+  - LiveCharts (NuGet: LiveCharts.WinForms)
+  - ScottPlot (NuGet: ScottPlot.WinForms) - 高效能即時繪圖
 - **主要方法**：
   - `PlotTimeDomain(data As Double())` - 繪製時域波形
   - `PlotFrequencyDomain(freqData As Complex())` - 繪製頻域頻譜
@@ -343,26 +350,26 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 
 ## 5. 資源使用估計
 
-### 5.1 FPGA 資源（以 Xilinx Artix-7 為例）
+### 5.1 FPGA 資源（Altera Cyclone III EP3C40Q240）
 
-| 資源類型 | 使用量 | 可用量 | 使用率 |
+| 資源類型 | 使用量（估計） | 可用量 | 使用率 |
 |----------|--------|--------|--------|
-| LUTs | ~15000 | 63400 | ~24% |
-| FFs | ~8000 | 126800 | ~6% |
-| BRAM (18Kb) | ~40 | 135 | ~30% |
-| DSP48 | ~20 | 240 | ~8% |
+| Logic Elements (LEs) | ~8000 | 39,600 | ~20% |
+| Memory Bits | ~65,536 | 1,161,216 | ~6% |
+| Embedded Multipliers | ~12 | 126 | ~10% |
+| PLLs | 1 | 4 | 25% |
 
 ### 5.2 記憶體需求
 
 #### FPGA 端
-- 輸入緩衝區：1024 × 32 bits = 4 KB
-- 輸出緩衝區：1024 × 32 bits = 4 KB
-- 旋轉因子 ROM：1024 × 32 bits = 4 KB
-- **總計**：約 12 KB
+- 輸入緩衝區：256 × 32 bits = 1 KB
+- 輸出緩衝區：256 × 32 bits = 1 KB
+- 旋轉因子 ROM：256 × 32 bits = 1 KB
+- **總計**：約 3 KB
 
 #### VB 端
-- 時域資料：1024 × 8 bytes = 8 KB
-- 頻域資料：1024 × 8 bytes = 8 KB
+- 時域資料：256 × 8 bytes = 2 KB
+- 頻域資料：256 × 8 bytes = 2 KB
 - 圖表緩衝：~1 MB
 - **總計**：約 1.02 MB
 
