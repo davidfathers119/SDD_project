@@ -63,7 +63,7 @@
 ### 1.3 介面需求
 
 #### IR-001：RS-232 通訊參數
-- **鮑率**：115200 bps（可配置：9600/19200/38400/57600/115200）
+- **鮑率**：38400 bps（目前匯入的 RS232 driver 最高支援 38400；若要 115200 需修改 driver 的 divisor/設定介面）
 - **資料位元**：8 bits
 - **停止位元**：1 bit
 - **同位檢查**：None / Even / Odd（可配置）
@@ -113,60 +113,51 @@
 
 ### 2.2 RS-232 接收模組規格
 
-#### 模組名稱：`rs232_rx`
+#### 模組名稱：`RS232_R2`（匯入既有 driver）
 
-##### 泛型參數
-| 參數名稱 | 型別 | 預設值 | 說明 |
-|----------|------|--------|------|
-| CLK_FREQ | integer | 50000000 | 系統時鐘頻率 (Hz) |
-| BAUD_RATE | integer | 115200 | 鮑率 (bps) |
-| DATA_BITS | integer | 8 | 資料位元數 |
-
-##### 連接埠
+##### 連接埠（依 rs232_r2.vhd）
 | 訊號名稱 | 方向 | 寬度 | 說明 |
 |----------|------|------|------|
-| clk | in | 1 | 系統時鐘 |
-| rst_n | in | 1 | 低電位重置 |
-| rx | in | 1 | RS-232 接收線 (RX) |
-| data_out | out | 8 | 接收到的資料 |
-| data_valid | out | 1 | 資料有效訊號 |
-| error | out | 1 | 接收錯誤 |
+| Clk | in | 1 | Driver 時鐘（建議 25 MHz；由 50 MHz 除 2 取得） |
+| Reset | in | 1 | Active-low reset（Reset='0' 重置） |
+| DL | in | 2 | Data length："11"=8-bit |
+| ParityN | in | 3 | Parity："0xx"=None |
+| StopN | in | 2 | Stop："00"=1 stop bit |
+| F_Set | in | 3 | 鮑率設定（driver 內建表，最高 38400） |
+| Status_s | out | 3 | (2)=Rx_B_Empty(=1 表示 buffer 有新資料), (1)=Parity Error, (0)=Overwrite |
+| Rx_R | in | 1 | 主控器讀取/清除握手（以 0->1 觸發清除） |
+| RD | in | 1 | UART RX 線 |
+| RxDs | out | 8 | 接收到的 byte |
 
 ##### 功能描述
-- 非同步序列資料接收
-- 過採樣技術（16x）降低誤差
-- 起始位元偵測
-- 同位檢查（可選）
-- 幀錯誤偵測
+- 以內建 divisor 表產生取樣時脈
+- 偵測起始位元、接收資料、選配 parity
+- 使用 1-byte buffer 與 Status_s(2) 做資料可用提示
+
+#### 包裝模組：`rs232_link`
+- 將 `RS232_R2/RS232_T1` 封裝成更好用的 byte streaming 介面：`rx_valid` 單拍脈波、`tx_ready` 準備好可送。
 
 ### 2.3 RS-232 傳送模組規格
 
-#### 模組名稱：`rs232_tx`
+#### 模組名稱：`RS232_T1`（匯入既有 driver）
 
-##### 泛型參數
-| 參數名稱 | 型別 | 預設值 | 說明 |
-|----------|------|--------|------|
-| CLK_FREQ | integer | 50000000 | 系統時鐘頻率 (Hz) |
-| BAUD_RATE | integer | 115200 | 鮑率 (bps) |
-| DATA_BITS | integer | 8 | 資料位元數 |
-
-##### 連接埠
+##### 連接埠（依 rs232_t1.vhd）
 | 訊號名稱 | 方向 | 寬度 | 說明 |
 |----------|------|------|------|
-| clk | in | 1 | 系統時鐘 |
-| rst_n | in | 1 | 低電位重置 |
-| data_in | in | 8 | 待傳送資料 |
-| data_valid | in | 1 | 資料有效（觸發傳送） |
-| tx | out | 1 | RS-232 傳送線 (TX) |
-| busy | out | 1 | 傳送中 |
-| done | out | 1 | 傳送完成 |
+| Clk | in | 1 | Driver 時鐘（建議 25 MHz；由 50 MHz 除 2 取得） |
+| Reset | in | 1 | Active-low reset（Reset='0' 重置） |
+| DL | in | 2 | Data length："11"=8-bit |
+| ParityN | in | 3 | Parity："0xx"=None |
+| StopN | in | 2 | Stop："00"=1 stop bit |
+| F_Set | in | 3 | 鮑率設定（driver 內建表，最高 38400） |
+| Status_s | out | 2 | (1)=Tx_B_Empty（0=可載入新資料）, (0)=TxO_W（overwrite） |
+| TX_W | in | 1 | 送出請求（對 '1' 的上升緣載入 TXData） |
+| TXData | in | 8 | 要送出的 byte |
+| TX | out | 1 | UART TX 線 |
 
 ##### 功能描述
-- 非同步序列資料傳送
-- 精確鮑率產生
-- 起始位元、資料位元、停止位元產生
-- 同位位元產生（可選）
-- 傳送狀態回饋
+- 1-byte buffer：主控器在 `Status_s(1)=0` 時可送下一個 byte
+- `TX_W` 單拍觸發載入並開始傳送
 
 ### 2.4 資料緩衝模組規格
 
@@ -269,7 +260,8 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 
 - **Header**：0xAA55（固定標頭）
 - **Length**：資料點數（N）
-- **Data[i]**：16-bit 實部 + 16-bit 虛部
+- **Data[i]**：16-bit 實部 + 16-bit 虛部（two's complement signed）
+- **端序**：Little-endian（每個 16-bit：先送低位元組，再送高位元組）
 - **Checksum**：XOR 檢查碼
 
 #### 頻域資料封包格式（FPGA → VB）
@@ -284,6 +276,7 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 - **Header**：0x55AA（固定標頭）
 - **Length**：頻率點數（N）
 - **Freq[i]**：16-bit 實部 + 16-bit 虛部（或振幅 + 相位）
+- **端序**：Little-endian（每個 16-bit：先送低位元組，再送高位元組）
 - **Checksum**：XOR 檢查碼
 
 ### 3.3 使用者介面規範
@@ -297,7 +290,7 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 +----------------------------------------------------------+
 |  參數設定區                                               |
 |  FFT 點數: [1024 ▼]  取樣頻率: [____] Hz                |
-|  COM 埠: [COM3 ▼]    鮑率: [115200 ▼]                   |
+|  COM 埠: [COM3 ▼]    鮑率: [38400 ▼]                    |
 +----------------------------------------------------------+
 |  時域波形                    |  頻域頻譜                  |
 |                              |                            |
@@ -340,6 +333,17 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 - `0xE2`：資料長度錯誤
 - `0xE3`：逾時
 - `0xE4`：緩衝區溢位
+
+---
+
+## 9. 實作狀態（Bring-up）
+
+目前 repo 內提供可綜合的串列與資料流骨架，方便先把 VB↔FPGA↔VB 跑通：
+
+- [FFT/src/vhdl/rs232_r2.vhd](FFT/src/vhdl/rs232_r2.vhd)、[FFT/src/vhdl/rs232_t1.vhd](FFT/src/vhdl/rs232_t1.vhd)：既有 RS232 driver
+- [FFT/src/vhdl/rs232_link.vhd](FFT/src/vhdl/rs232_link.vhd)：握手包裝（避免同一 byte 讀三次）
+- [FFT/src/vhdl/fft_system_top.vhd](FFT/src/vhdl/fft_system_top.vhd)：封包解析 + 回傳資料（目前回傳為「原樣 echo」，FFT 由 stub 佔位）
+- [FFT/src/vhdl/fft_core_stub.vhd](FFT/src/vhdl/fft_core_stub.vhd)：FFT core 佔位（後續替換成真正 256-point FFT）
 
 #### 重傳機制
 - 最大重傳次數：3 次

@@ -1,0 +1,313 @@
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
+
+entity fft_system_top is
+    generic (
+        FFT_SIZE   : integer := 256;
+        DATA_WIDTH : integer := 16
+    );
+    port (
+        clk50     : in  std_logic; -- 50MHz
+        rst_n     : in  std_logic;
+
+        uart_rx   : in  std_logic;
+        uart_tx   : out std_logic;
+
+        led_status: out std_logic_vector(7 downto 0)
+    );
+end entity;
+
+architecture rtl of fft_system_top is
+    -- 50MHz -> 25MHz (driver 內部 divisor 表以 25MHz 設計)
+    signal clk25 : std_logic := '0';
+
+    -- UART link
+    signal rx_b    : std_logic_vector(7 downto 0);
+    signal rx_v    : std_logic;
+    signal tx_b    : std_logic_vector(7 downto 0) := (others => '0');
+    signal tx_v    : std_logic := '0';
+    signal tx_rdy  : std_logic;
+
+    -- packet parser
+    type pstate_t is (
+        WAIT_H1, WAIT_H2,
+        WAIT_LEN0, WAIT_LEN1,
+        RECV_PAYLOAD,
+        START_FFT,
+        SEND_H1, SEND_H2,
+        SEND_LEN0, SEND_LEN1,
+        SEND_PAYLOAD
+    );
+    signal ps : pstate_t := WAIT_H1;
+
+    constant RX_HEADER_H1 : std_logic_vector(7 downto 0) := x"AA";
+    constant RX_HEADER_H2 : std_logic_vector(7 downto 0) := x"55";
+    constant TX_HEADER_H1 : std_logic_vector(7 downto 0) := x"55";
+    constant TX_HEADER_H2 : std_logic_vector(7 downto 0) := x"AA";
+
+    signal len0, len1 : std_logic_vector(7 downto 0) := (others => '0');
+    signal sample_idx : integer range 0 to FFT_SIZE-1 := 0;
+    signal byte_in_sample : integer range 0 to 3 := 0;
+
+    type mem_t is array (0 to FFT_SIZE-1) of signed(DATA_WIDTH-1 downto 0);
+    signal in_re_mem, in_im_mem : mem_t;
+
+    signal re_lo, re_hi, im_lo, im_hi : std_logic_vector(7 downto 0) := (others => '0');
+
+    -- fft stub
+    signal fft_start : std_logic := '0';
+    signal fft_in_re, fft_in_im : signed(DATA_WIDTH-1 downto 0) := (others => '0');
+    signal fft_in_valid : std_logic := '0';
+
+    signal fft_out_re, fft_out_im : signed(DATA_WIDTH-1 downto 0);
+    signal fft_out_valid : std_logic;
+    signal fft_busy, fft_done : std_logic;
+
+    -- send side
+    signal out_idx : integer range 0 to FFT_SIZE-1 := 0;
+    signal out_byte_sel : integer range 0 to 3 := 0;
+
+    -- helper
+    function to_s16(lo_b, hi_b : std_logic_vector(7 downto 0)) return signed is
+        variable tmp : std_logic_vector(15 downto 0);
+    begin
+        tmp := hi_b & lo_b; -- little-endian: lo first, then hi
+        return signed(tmp);
+    end function;
+
+begin
+    -- clock /2
+    process(clk50, rst_n)
+    begin
+        if rst_n = '0' then
+            clk25 <= '0';
+        elsif rising_edge(clk50) then
+            clk25 <= not clk25;
+        end if;
+    end process;
+
+    u_link: entity work.rs232_link
+        port map(
+            clk      => clk25,
+            rst_n    => rst_n,
+            rx       => uart_rx,
+            tx       => uart_tx,
+            rx_data  => rx_b,
+            rx_valid => rx_v,
+            tx_data  => tx_b,
+            tx_valid => tx_v,
+            tx_ready => tx_rdy
+        );
+
+    u_fft: entity work.fft_core_stub
+        generic map(
+            FFT_SIZE => FFT_SIZE,
+            DATA_WIDTH => DATA_WIDTH
+        )
+        port map(
+            clk       => clk25,
+            rst_n     => rst_n,
+            start     => fft_start,
+            in_re     => fft_in_re,
+            in_im     => fft_in_im,
+            in_valid  => fft_in_valid,
+            out_re    => fft_out_re,
+            out_im    => fft_out_im,
+            out_valid => fft_out_valid,
+            busy      => fft_busy,
+            done      => fft_done
+        );
+
+    -- LED: 簡易狀態
+    led_status(0) <= rx_v;
+    led_status(1) <= tx_rdy;
+    led_status(2) <= fft_busy;
+    led_status(3) <= fft_done;
+    led_status(7 downto 4) <= (others => '0');
+
+    -- packet FSM + FFT feed + TX
+    process(clk25, rst_n)
+        variable length_val : integer;
+    begin
+        if rst_n = '0' then
+            ps <= WAIT_H1;
+            len0 <= (others => '0');
+            len1 <= (others => '0');
+            sample_idx <= 0;
+            byte_in_sample <= 0;
+
+            re_lo <= (others => '0');
+            re_hi <= (others => '0');
+            im_lo <= (others => '0');
+            im_hi <= (others => '0');
+
+            fft_start <= '0';
+            fft_in_valid <= '0';
+            tx_v <= '0';
+            tx_b <= (others => '0');
+            out_idx <= 0;
+            out_byte_sel <= 0;
+        elsif rising_edge(clk25) then
+            -- defaults
+            fft_start <= '0';
+            fft_in_valid <= '0';
+            tx_v <= '0';
+
+            case ps is
+                when WAIT_H1 =>
+                    if rx_v = '1' then
+                        if rx_b = RX_HEADER_H1 then
+                            ps <= WAIT_H2;
+                        end if;
+                    end if;
+
+                when WAIT_H2 =>
+                    if rx_v = '1' then
+                        if rx_b = RX_HEADER_H2 then
+                            ps <= WAIT_LEN0;
+                        else
+                            ps <= WAIT_H1;
+                        end if;
+                    end if;
+
+                when WAIT_LEN0 =>
+                    if rx_v = '1' then
+                        len0 <= rx_b;
+                        ps <= WAIT_LEN1;
+                    end if;
+
+                when WAIT_LEN1 =>
+                    if rx_v = '1' then
+                        len1 <= rx_b;
+                        sample_idx <= 0;
+                        byte_in_sample <= 0;
+
+                        length_val := to_integer(unsigned(rx_b & len0));
+                        if length_val = FFT_SIZE then
+                            ps <= RECV_PAYLOAD;
+                        else
+                            -- 長度不符：丟棄，重新等 header
+                            ps <= WAIT_H1;
+                        end if;
+                    end if;
+
+                when RECV_PAYLOAD =>
+                    if rx_v = '1' then
+                        case byte_in_sample is
+                            when 0 => re_lo <= rx_b;
+                            when 1 => re_hi <= rx_b;
+                            when 2 => im_lo <= rx_b;
+                            when others =>
+                                im_hi <= rx_b;
+                                -- commit one sample
+                                in_re_mem(sample_idx) <= to_s16(re_lo, re_hi);
+                                in_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
+
+                                if sample_idx = FFT_SIZE-1 then
+                                    ps <= START_FFT;
+                                else
+                                    sample_idx <= sample_idx + 1;
+                                end if;
+                        end case;
+
+                        if byte_in_sample = 3 then
+                            byte_in_sample <= 0;
+                        else
+                            byte_in_sample <= byte_in_sample + 1;
+                        end if;
+                    end if;
+
+                when START_FFT =>
+                    -- 先用 stub：把記憶體資料餵進去
+                    fft_start <= '1';
+                    sample_idx <= 0;
+                    ps <= START_FFT; -- 留在此狀態直到送完
+
+                    -- start 後的第一拍就開始送資料
+                    fft_in_re <= in_re_mem(0);
+                    fft_in_im <= in_im_mem(0);
+                    fft_in_valid <= '1';
+                    if FFT_SIZE = 1 then
+                        ps <= SEND_H1;
+                    else
+                        sample_idx <= 1;
+                        ps <= START_FFT;
+                    end if;
+
+                    -- 下一拍開始持續送；用另一段邏輯（下面）
+
+                when SEND_H1 =>
+                    if tx_rdy = '1' then
+                        tx_b <= TX_HEADER_H1;
+                        tx_v <= '1';
+                        ps <= SEND_H2;
+                    end if;
+
+                when SEND_H2 =>
+                    if tx_rdy = '1' then
+                        tx_b <= TX_HEADER_H2;
+                        tx_v <= '1';
+                        ps <= SEND_LEN0;
+                    end if;
+
+                when SEND_LEN0 =>
+                    if tx_rdy = '1' then
+                        tx_b <= std_logic_vector(to_unsigned(FFT_SIZE,16))(7 downto 0);
+                        tx_v <= '1';
+                        ps <= SEND_LEN1;
+                    end if;
+
+                when SEND_LEN1 =>
+                    if tx_rdy = '1' then
+                        tx_b <= std_logic_vector(to_unsigned(FFT_SIZE,16))(15 downto 8);
+                        tx_v <= '1';
+                        out_idx <= 0;
+                        out_byte_sel <= 0;
+                        ps <= SEND_PAYLOAD;
+                    end if;
+
+                when SEND_PAYLOAD =>
+                    if tx_rdy = '1' then
+                        -- 目前 stub：回傳原始資料（之後換成 fft_out_* 或 buffer）
+                        case out_byte_sel is
+                            when 0 => tx_b <= std_logic_vector(in_re_mem(out_idx))(7 downto 0);
+                            when 1 => tx_b <= std_logic_vector(in_re_mem(out_idx))(15 downto 8);
+                            when 2 => tx_b <= std_logic_vector(in_im_mem(out_idx))(7 downto 0);
+                            when others => tx_b <= std_logic_vector(in_im_mem(out_idx))(15 downto 8);
+                        end case;
+                        tx_v <= '1';
+
+                        if out_byte_sel = 3 then
+                            out_byte_sel <= 0;
+                            if out_idx = FFT_SIZE-1 then
+                                ps <= WAIT_H1;
+                            else
+                                out_idx <= out_idx + 1;
+                            end if;
+                        else
+                            out_byte_sel <= out_byte_sel + 1;
+                        end if;
+                    end if;
+            end case;
+
+            -- 持續餵 FFT stub（在 START_FFT 狀態）
+            if ps = START_FFT then
+                if sample_idx < FFT_SIZE then
+                    fft_in_re <= in_re_mem(sample_idx);
+                    fft_in_im <= in_im_mem(sample_idx);
+                    fft_in_valid <= '1';
+                    if sample_idx = FFT_SIZE-1 then
+                        ps <= SEND_H1;
+                    else
+                        sample_idx <= sample_idx + 1;
+                    end if;
+                else
+                    ps <= SEND_H1;
+                end if;
+            end if;
+
+        end if;
+    end process;
+
+end architecture;
