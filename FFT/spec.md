@@ -262,7 +262,7 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 - **Length**：資料點數（N）
 - **Data[i]**：16-bit 實部 + 16-bit 虛部（two's complement signed）
 - **端序**：Little-endian（每個 16-bit：先送低位元組，再送高位元組）
-- **Checksum**：XOR 檢查碼
+- **Checksum**：XOR 檢查碼（可選；目前 bring-up 版本未啟用）
 
 #### 頻域資料封包格式（FPGA → VB）
 
@@ -277,7 +277,21 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 - **Length**：頻率點數（N）
 - **Freq[i]**：16-bit 實部 + 16-bit 虛部（或振幅 + 相位）
 - **端序**：Little-endian（每個 16-bit：先送低位元組，再送高位元組）
-- **Checksum**：XOR 檢查碼
+- **Checksum**：XOR 檢查碼（可選；目前 bring-up 版本未啟用）
+
+#### Bring-up 協定（目前 `fft_system_top` 實作對齊）
+
+為了先讓 VB↔FPGA↔VB 端到端跑通，目前 FPGA 端採用「最小封包」：
+
+- VB → FPGA：`0xAA 0x55` + `Length(2 bytes, little-endian, 必須=256)` + `Payload(256 * 4 bytes)`
+- FPGA → VB：`0x55 0xAA` + `Length(2 bytes, little-endian, 必須=256)` + `Payload(256 * 4 bytes)`
+
+其中 `Payload` 每筆樣本為 4 bytes：
+
+- `re_lo, re_hi, im_lo, im_hi`
+- `re/im` 為 16-bit two's complement signed
+
+備註：目前 bring-up 版本未實作 checksum/重傳/ACK；後續可升級為完整握手版本（見第 4 章）。
 
 ### 3.3 使用者介面規範
 
@@ -289,7 +303,7 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 |  [產生波形] [傳送至FPGA] [接收結果] [清除]              |
 +----------------------------------------------------------+
 |  參數設定區                                               |
-|  FFT 點數: [1024 ▼]  取樣頻率: [____] Hz                |
+|  FFT 點數: [256 固定]  取樣頻率: [____] Hz              |
 |  COM 埠: [COM3 ▼]    鮑率: [38400 ▼]                    |
 +----------------------------------------------------------+
 |  時域波形                    |  頻域頻譜                  |
@@ -304,7 +318,111 @@ IDLE → RECEIVE_DATA → WAIT_COMPLETE → FFT_COMPUTE → SEND_RESULT → IDLE
 
 ---
 
+### 3.4 開發環境與非功能性需求（VB 端）
+
+#### VB-ENV-001：開發工具
+- IDE：Visual Studio 2022
+- 語言：Visual Basic .NET
+- 目標框架：.NET 6.0 (LTS)（若環境允許，也可用 .NET 8.0 LTS）
+- UI：Windows Forms
+
+#### VB-NFR-001：UI 不卡頓
+- 串列通訊、封包解析、資料轉換不得阻塞 UI thread。
+- 所有耗時工作必須在背景執行（Task/BackgroundWorker），並以 `Invoke/BeginInvoke` 回到 UI 更新圖表。
+
+#### VB-NFR-002：可觀測性
+- 必須提供 Log 視窗或檔案紀錄：連線參數、封包統計、錯誤原因、逾時、重傳次數（若啟用）。
+
+#### VB-NFR-003：可重現
+- 能匯出/匯入：時域輸入資料、頻域輸出資料（CSV）。
+
+### 3.5 VB 端架構設計（SDD）
+
+採用「UI / Service / Protocol / DSP」分層，降低耦合：
+
+1. **UI Layer**：MainForm
+  - 使用者操作、狀態顯示、圖表呈現
+2. **Service Layer**：FftSessionService
+  - 一次完整流程：產生/載入 → 傳送 → 接收 → 顯示
+3. **Protocol Layer**：Rs232PacketCodec + ByteStreamParser
+  - 建封包、拆封包、byte stream 解析（Header/Length/Payload）
+4. **DSP/Model Layer**：WaveGenerator + SpectrumMath
+  - 產生波形、轉 magnitude、頻率刻度、（可選）用軟體 FFT 對照驗證
+
+### 3.6 類別/模組規格（建議介面）
+
+#### 類別：`SerialPortAdapter`
+- 職責：封裝 `System.IO.Ports.SerialPort`，提供非同步收發與取消。
+- 主要成員：
+  - `Open(portName As String, baud As Integer)`
+  - `Close()`
+  - `WriteAsync(data As Byte(), ct As CancellationToken) As Task`
+  - `DataReceived` 事件：將收到的 bytes 推入 `ByteStreamParser`
+
+#### 類別：`ByteStreamParser`
+- 職責：從任意分段的 bytes 組出完整封包。
+- 狀態機：`WAIT_H1 → WAIT_H2 → WAIT_LEN0 → WAIT_LEN1 → WAIT_PAYLOAD`
+- 輸出：`OnPacket(header, length, payload)` callback/event。
+
+#### 類別：`Rs232PacketCodec`
+- 職責：建立「256 點封包」與解析 payload。
+- `BuildTimeDomainPacket(samplesRe() As Short, samplesIm() As Short) As Byte()`
+- `ParseComplexPayload(payload As Byte()) As (re() As Short, im() As Short)`
+
+#### 類別：`WaveGenerator`
+- 職責：產生長度固定 256 的波形。
+- 輸出格式：`Short()`（two's complement），建議範圍 -32768..32767。
+
+#### 類別：`SpectrumMath`
+- 職責：把 complex 輸出轉成 magnitude/phase，並計算頻率刻度。
+- `Magnitude(re As Short(), im As Short()) As Double()`
+- `FrequencyAxis(fsHz As Double, n As Integer) As Double()`
+
+#### 類別：`FftSessionService`
+- 職責：控制一次完整的收發與 UI 更新。
+- 流程：
+  1) 建立 256 點封包並送出
+  2) 等待回包（逾時處理）
+  3) 解析回包 -> complex
+  4) 更新時域圖、頻域圖
+
+### 3.7 VB 端狀態機（建議）
+
+#### Session 狀態
+`Idle → PortOpen → Sending → WaitingResponse → Parsing → Plotting → Idle`
+
+#### 錯誤狀態
+- `Timeout`：顯示錯誤並回到 `Idle`（或依設定重試）
+- `BadHeader/BadLength`：丟棄資料、重新同步 header
+- `PortError`：提示使用者檢查 COM/權限
+
+### 3.8 通訊逾時與重試（VB 端）
+
+- `T_send`：送出封包後開始計時
+- `T_resp_max`：建議 3~10 秒（初期可放寬）
+- `RetryMax`：0（bring-up）或 3（完整協定）
+
+### 3.9 圖表更新規範
+
+- 時域：顯示 256 點，X 軸為 sample index 或時間（需 fsHz）
+- 頻域：顯示 0..fs/2 的前 128 bins（常用），或顯示完整 256 bins
+- 更新節流：最短 50ms 更新一次，避免 UI 卡頓
+
+### 3.10 測試規格（VB 端）
+
+#### 單元測試
+- PacketCodec：固定輸入 samples，序列化後再 parse 必須一致
+- Parser：碎片化輸入（每次 1 byte / 隨機長度）仍能組包
+
+#### 整合測試
+- 迴圈測試：連續送 100 次封包不當機
+- 錯誤注入：隨機插入雜訊 byte，Parser 能重新同步
+
+（VB 開發細節與套件選型，另見：FFT/VB_NET_Development_Guide.md）
+
 ## 4. 通訊協定規格
+
+本章描述「完整協定」的目標設計；但目前 bring-up 版本以第 3.2 節的最小封包為準。
 
 ### 4.1 握手協定
 
