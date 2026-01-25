@@ -75,3 +75,10 @@ desktop.ini
 *.pdf
 *.doc
 *.docx
+
+# .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo

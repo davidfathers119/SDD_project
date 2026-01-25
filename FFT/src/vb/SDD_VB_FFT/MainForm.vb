@@ -193,7 +193,9 @@ Public Class MainForm
                 _btnSend.Enabled = False
                 SetStatus("Sending... waiting response")
 
-                Dim (outRe, outIm) = Await _service.SendAndReceiveAsync(packet, timeoutMs:=8000, ct:=cts.Token)
+                Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=8000, ct:=cts.Token)
+                Dim outRe = response.Item1
+                Dim outIm = response.Item2
 
                 Dim mag As Double() = SpectrumMath.Magnitude(outRe, outIm)
                 PlotFreq(mag)
@@ -219,7 +221,7 @@ Public Class MainForm
         Dim s = _chartFreq.Series(0)
         s.Points.Clear()
         ' 先畫前 N/2（常用）
-        Dim half As Integer = mag.Length \\ 2
+        Dim half As Integer = mag.Length \ 2
         For i As Integer = 0 To half - 1
             s.Points.AddXY(i, mag(i))
         Next

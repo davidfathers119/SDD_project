@@ -29,7 +29,7 @@ entity fft_core_stub is
 end entity;
 
 architecture rtl of fft_core_stub is
-    type state_t is (IDLE, RUN, OUT);
+    type state_t is (IDLE, RUN, ST_OUT);
     signal state : state_t := IDLE;
 
     type mem_t is array (0 to FFT_SIZE-1) of signed(DATA_WIDTH-1 downto 0);
@@ -70,14 +70,14 @@ begin
                         mem_re(wr_idx) <= in_re;
                         mem_im(wr_idx) <= in_im;
                         if wr_idx = FFT_SIZE-1 then
-                            state <= OUT;
+                            state <= ST_OUT;
                             rd_idx <= 0;
                         else
                             wr_idx <= wr_idx + 1;
                         end if;
                     end if;
 
-                when OUT =>
+                when ST_OUT =>
                     -- 直接把資料原樣吐回（代表 FFT 結果尚未實作）
                     out_re <= mem_re(rd_idx);
                     out_im <= mem_im(rd_idx);

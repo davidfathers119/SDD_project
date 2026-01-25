@@ -52,11 +52,11 @@ Namespace Modules
                     Throw New TimeoutException("等待 FPGA 回包逾時")
                 End If
 
-                Dim (_, length, payload) = Await tcs.Task
-                Dim n As Integer = CInt(length)
+                Dim result = Await tcs.Task
+                Dim n As Integer = CInt(result.Item2)
                 Dim re As Short() = Nothing
                 Dim im As Short() = Nothing
-                Rs232PacketCodec.ParseComplexPayload(payload, n, re, im)
+                Rs232PacketCodec.ParseComplexPayload(result.Item3, n, re, im)
                 Return (re, im)
             End Using
         End Function
