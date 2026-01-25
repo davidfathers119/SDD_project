@@ -225,6 +225,7 @@ Public Class MainForm
                 _btnSend.Enabled = False
                 _rxChunkCount = 0
                 Interlocked.Exchange(_rxBytesTotal, 0)
+                _port.ClearBuffers()
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")

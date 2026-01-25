@@ -22,10 +22,22 @@ Namespace Modules
                 .Parity = Parity.None,
                 .StopBits = StopBits.One,
                 .Handshake = Handshake.None,
+                .DtrEnable = True,
+                .RtsEnable = True,
                 .ReadTimeout = 2000,
                 .WriteTimeout = 2000
             }
             AddHandler _port.DataReceived, AddressOf OnDataReceived
+        End Sub
+
+        Public Sub ClearBuffers()
+            If Not _port.IsOpen Then Return
+            Try
+                _port.DiscardInBuffer()
+                _port.DiscardOutBuffer()
+            Catch ex As Exception
+                RaiseEvent PortError($"ClearBuffers failed: {ex.Message}")
+            End Try
         End Sub
 
         Public ReadOnly Property IsOpen As Boolean
