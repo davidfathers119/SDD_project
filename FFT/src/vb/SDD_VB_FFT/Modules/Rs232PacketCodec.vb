@@ -22,7 +22,10 @@ Namespace Modules
             Dim buffer(total - 1) As Byte
 
             Dim offset As Integer = 0
-            WriteUInt16LE(buffer, offset, HeaderTxToFpga) : offset += 2
+            ' FPGA expects RX header bytes in-order: 0xAA then 0x55.
+            buffer(offset) = CByte((HeaderTxToFpga >> 8) And &HFFUS)
+            buffer(offset + 1) = CByte(HeaderTxToFpga And &HFFUS)
+            offset += 2
             WriteUInt16LE(buffer, offset, CUShort(n)) : offset += 2
 
             For i As Integer = 0 To n - 1
@@ -56,7 +59,8 @@ Namespace Modules
         End Sub
 
         Public Shared Sub WriteInt16LE(dst As Byte(), offset As Integer, value As Short)
-            Dim u As UShort = CUShort(CUShort(value) And &HFFFFUS)
+            ' Avoid OverflowException for negative values when converting Short -> UShort.
+            Dim u As UShort = CUShort(CInt(value) And &HFFFF)
             WriteUInt16LE(dst, offset, u)
         End Sub
 

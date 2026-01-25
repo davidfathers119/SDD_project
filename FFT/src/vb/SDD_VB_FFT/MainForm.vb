@@ -29,6 +29,10 @@ Public Class MainForm
 
     Private ReadOnly _lblStatus As New Label()
 
+    Private ReadOnly _txtLog As New TextBox()
+    Private _rxBytesTotal As Long
+    Private _rxChunkCount As Integer
+
     Private ReadOnly _chartTime As New Chart()
     Private ReadOnly _chartFreq As New Chart()
 
@@ -41,10 +45,30 @@ Public Class MainForm
 
         _service = New FftSessionService(_port, _parser)
 
-        AddHandler _port.PortError, Sub(msg) SetStatus($"Port error: {msg}")
-        AddHandler _parser.ParserError, Sub(msg) SetStatus($"Parser error: {msg}")
+        AddHandler _port.PortError, Sub(msg)
+                                        SetStatus($"Port error: {msg}")
+                                        Log($"[PortError] {msg}")
+                                    End Sub
+        AddHandler _port.BytesReceived, Sub(data)
+                                            If data Is Nothing Then Return
+                                            Interlocked.Add(_rxBytesTotal, data.Length)
+                                            Dim chunkIdx As Integer = Interlocked.Increment(_rxChunkCount)
+                                            ' Avoid flooding UI: show only first ~30 chunks per run.
+                                            If chunkIdx <= 30 Then
+                                                Log($"[RX] chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} head={BitConverter.ToString(data, 0, Math.Min(8, data.Length))}")
+                                            End If
+                                        End Sub
+        AddHandler _parser.ParserError, Sub(msg)
+                                            SetStatus($"Parser error: {msg}")
+                                            Log($"[ParserError] {msg}")
+                                        End Sub
+        AddHandler _parser.PacketReceived, Sub(header, length, payload)
+                                               Log($"[Packet] header=0x{header:X4} len={length} payloadBytes={If(payload Is Nothing, 0, payload.Length)}")
+                                           End Sub
 
         InitializeUi()
+        Log($"[App] BaseDir={AppDomain.CurrentDomain.BaseDirectory}")
+        Log($"[App] Assembly={GetType(MainForm).Assembly.Location}")
         RefreshPorts()
     End Sub
 
@@ -85,6 +109,13 @@ Public Class MainForm
         _lblStatus.Height = 24
         _lblStatus.Text = "Ready"
 
+        _txtLog.Dock = DockStyle.Bottom
+        _txtLog.Height = 140
+        _txtLog.Multiline = True
+        _txtLog.ReadOnly = True
+        _txtLog.ScrollBars = ScrollBars.Vertical
+        _txtLog.Font = New Drawing.Font("Consolas", 9.0F)
+
         Dim split As New SplitContainer() With {
             .Dock = DockStyle.Fill,
             .Orientation = Orientation.Vertical,
@@ -99,6 +130,7 @@ Public Class MainForm
 
         Controls.Add(split)
         Controls.Add(topPanel)
+        Controls.Add(_txtLog)
         Controls.Add(_lblStatus)
     End Sub
 
@@ -191,7 +223,12 @@ Public Class MainForm
         Using cts As New CancellationTokenSource()
             Try
                 _btnSend.Enabled = False
-                SetStatus("Sending... waiting response")
+                _rxChunkCount = 0
+                Interlocked.Exchange(_rxBytesTotal, 0)
+                Dim previewLen As Integer = Math.Min(8, packet.Length)
+                Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
+                SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
+                Log($"[TX] bytes={packet.Length} head={preview}")
 
                 Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=8000, ct:=cts.Token)
                 Dim outRe = response.Item1
@@ -203,11 +240,25 @@ Public Class MainForm
                 SetStatus("Done")
             Catch ex As Exception
                 SetStatus($"Error: {ex.Message}")
+                Log($"[Error] {ex}")
             Finally
                 _btnSend.Enabled = True
             End Try
         End Using
     End Function
+
+    Private Sub Log(message As String)
+        If InvokeRequired Then
+            BeginInvoke(New Action(Of String)(AddressOf Log), message)
+            Return
+        End If
+
+        If _txtLog.TextLength > 20000 Then
+            _txtLog.Clear()
+        End If
+
+        _txtLog.AppendText($"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}")
+    End Sub
 
     Private Sub PlotTime(re As Short())
         Dim s = _chartTime.Series(0)
