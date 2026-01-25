@@ -16,9 +16,13 @@ entity fft_system_top is
 
         led_status: out std_logic_vector(7 downto 0)
     );
-end entity;
+end fft_system_top;
 
 architecture rtl of fft_system_top is
+    -- Quartus 13.1 對「generic 用在 array/range bounds」偶爾會在 elaborate/map 階段崩潰。
+    -- 這個專案目前目標固定 256-point / 16-bit，因此內部統一用常數做 bounds，提升相容性。
+    constant FFT_N      : integer := 256;
+    constant DATA_W     : integer := 16;
     -- 50MHz -> 25MHz (driver 內部 divisor 表以 25MHz 設計)
     signal clk25 : std_logic := '0';
 
@@ -47,29 +51,32 @@ architecture rtl of fft_system_top is
     constant TX_HEADER_H2 : std_logic_vector(7 downto 0) := x"AA";
 
     signal len0, len1 : std_logic_vector(7 downto 0) := (others => '0');
-    signal sample_idx : integer range 0 to FFT_SIZE-1 := 0;
+    signal sample_idx : integer range 0 to FFT_N-1 := 0;
     signal byte_in_sample : integer range 0 to 3 := 0;
 
-    type mem_t is array (0 to FFT_SIZE-1) of signed(DATA_WIDTH-1 downto 0);
+    type mem_t is array (0 to FFT_N-1) of signed(DATA_W-1 downto 0);
     signal in_re_mem, in_im_mem : mem_t;
 
     signal re_lo, re_hi, im_lo, im_hi : std_logic_vector(7 downto 0) := (others => '0');
 
     -- fft stub
     signal fft_start : std_logic := '0';
-    signal fft_in_re, fft_in_im : signed(DATA_WIDTH-1 downto 0) := (others => '0');
+    signal fft_in_re, fft_in_im : signed(DATA_W-1 downto 0) := (others => '0');
     signal fft_in_valid : std_logic := '0';
 
-    signal fft_out_re, fft_out_im : signed(DATA_WIDTH-1 downto 0);
+    signal fft_out_re, fft_out_im : signed(DATA_W-1 downto 0);
     signal fft_out_valid : std_logic;
     signal fft_busy, fft_done : std_logic;
 
     -- send side
-    signal out_idx : integer range 0 to FFT_SIZE-1 := 0;
+    signal out_idx : integer range 0 to FFT_N-1 := 0;
     signal out_byte_sel : integer range 0 to 3 := 0;
 
+    constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
+
     -- helper
-    function to_s16(lo_b, hi_b : std_logic_vector(7 downto 0)) return signed is
+    subtype s16_t is signed(15 downto 0);
+    function to_s16(lo_b, hi_b : std_logic_vector(7 downto 0)) return s16_t is
         variable tmp : std_logic_vector(15 downto 0);
     begin
         tmp := hi_b & lo_b; -- little-endian: lo first, then hi
@@ -102,8 +109,8 @@ begin
 
     u_fft: entity work.fft_core_stub
         generic map(
-            FFT_SIZE => FFT_SIZE,
-            DATA_WIDTH => DATA_WIDTH
+            FFT_SIZE => FFT_N,
+            DATA_WIDTH => DATA_W
         )
         port map(
             clk       => clk25,
@@ -184,7 +191,7 @@ begin
                         byte_in_sample <= 0;
 
                         length_val := to_integer(unsigned(rx_b & len0));
-                        if length_val = FFT_SIZE then
+                        if length_val = FFT_N then
                             ps <= RECV_PAYLOAD;
                         else
                             -- 長度不符：丟棄，重新等 header
@@ -204,7 +211,7 @@ begin
                                 in_re_mem(sample_idx) <= to_s16(re_lo, re_hi);
                                 in_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
 
-                                if sample_idx = FFT_SIZE-1 then
+                                if sample_idx = FFT_N-1 then
                                     ps <= START_FFT;
                                 else
                                     sample_idx <= sample_idx + 1;
@@ -228,7 +235,7 @@ begin
                     fft_in_re <= in_re_mem(0);
                     fft_in_im <= in_im_mem(0);
                     fft_in_valid <= '1';
-                    if FFT_SIZE = 1 then
+                    if FFT_N = 1 then
                         ps <= SEND_H1;
                     else
                         sample_idx <= 1;
@@ -253,14 +260,14 @@ begin
 
                 when SEND_LEN0 =>
                     if tx_rdy = '1' then
-                        tx_b <= std_logic_vector(to_unsigned(FFT_SIZE,16))(7 downto 0);
+                        tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                         tx_v <= '1';
                         ps <= SEND_LEN1;
                     end if;
 
                 when SEND_LEN1 =>
                     if tx_rdy = '1' then
-                        tx_b <= std_logic_vector(to_unsigned(FFT_SIZE,16))(15 downto 8);
+                        tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                         tx_v <= '1';
                         out_idx <= 0;
                         out_byte_sel <= 0;
@@ -271,16 +278,16 @@ begin
                     if tx_rdy = '1' then
                         -- 目前 stub：回傳原始資料（之後換成 fft_out_* 或 buffer）
                         case out_byte_sel is
-                            when 0 => tx_b <= std_logic_vector(in_re_mem(out_idx))(7 downto 0);
-                            when 1 => tx_b <= std_logic_vector(in_re_mem(out_idx))(15 downto 8);
-                            when 2 => tx_b <= std_logic_vector(in_im_mem(out_idx))(7 downto 0);
-                            when others => tx_b <= std_logic_vector(in_im_mem(out_idx))(15 downto 8);
+                            when 0 => tx_b <= std_logic_vector(in_re_mem(out_idx)(7 downto 0));
+                            when 1 => tx_b <= std_logic_vector(in_re_mem(out_idx)(15 downto 8));
+                            when 2 => tx_b <= std_logic_vector(in_im_mem(out_idx)(7 downto 0));
+                            when others => tx_b <= std_logic_vector(in_im_mem(out_idx)(15 downto 8));
                         end case;
                         tx_v <= '1';
 
                         if out_byte_sel = 3 then
                             out_byte_sel <= 0;
-                            if out_idx = FFT_SIZE-1 then
+                            if out_idx = FFT_N-1 then
                                 ps <= WAIT_H1;
                             else
                                 out_idx <= out_idx + 1;
@@ -293,11 +300,11 @@ begin
 
             -- 持續餵 FFT stub（在 START_FFT 狀態）
             if ps = START_FFT then
-                if sample_idx < FFT_SIZE then
+                if sample_idx < FFT_N then
                     fft_in_re <= in_re_mem(sample_idx);
                     fft_in_im <= in_im_mem(sample_idx);
                     fft_in_valid <= '1';
-                    if sample_idx = FFT_SIZE-1 then
+                    if sample_idx = FFT_N-1 then
                         ps <= SEND_H1;
                     else
                         sample_idx <= sample_idx + 1;
@@ -310,4 +317,4 @@ begin
         end if;
     end process;
 
-end architecture;
+end rtl;

@@ -26,7 +26,7 @@ entity fft_core_stub is
         busy          : out std_logic;
         done          : out std_logic
     );
-end entity;
+end fft_core_stub;
 
 architecture rtl of fft_core_stub is
     type state_t is (IDLE, RUN, ST_OUT);
@@ -92,4 +92,4 @@ begin
             end case;
         end if;
     end process;
-end architecture;
+    end rtl;

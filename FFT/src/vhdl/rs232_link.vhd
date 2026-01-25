@@ -27,7 +27,7 @@ entity rs232_link is
         tx_valid   : in  std_logic; -- request to send 1 byte
         tx_ready   : out std_logic  -- high when driver can accept a new byte
     );
-end entity;
+end rs232_link;
 
 architecture rtl of rs232_link is
     signal status_t : std_logic_vector(1 downto 0);
@@ -37,6 +37,8 @@ architecture rtl of rs232_link is
     signal rx_r     : std_logic := '0';
 
     signal rx_data_i : std_logic_vector(7 downto 0);
+
+    signal tx_ready_i : std_logic;
 
     signal rx_seen_full : std_logic := '0';
     signal tx_pulse     : std_logic := '0';
@@ -72,7 +74,8 @@ begin
         );
 
     -- status_t(1)=Tx_B_Empty：0 表示可寫入新資料
-    tx_ready <= not status_t(1);
+    tx_ready_i <= not status_t(1);
+    tx_ready   <= tx_ready_i;
 
     process(clk, rst_n)
     begin
@@ -83,7 +86,7 @@ begin
             -- default
             tx_w <= '0';
 
-            if (tx_valid = '1') and (tx_ready = '1') then
+            if (tx_valid = '1') and (tx_ready_i = '1') then
                 -- 單拍載入 TXData
                 tx_w <= '1';
             end if;
@@ -117,4 +120,4 @@ begin
         end if;
     end process;
 
-end architecture;
+    end rtl;
