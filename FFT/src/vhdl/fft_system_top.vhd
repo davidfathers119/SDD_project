@@ -242,7 +242,8 @@ begin
                     end if;
 
                 when SEND_H1 =>
-                    tx_rx_packet_received = '1' then  -- 只有接收过封包才发送
+                    tx_b <= TX_HEADER_H1;
+                    if rx_packet_received = '1' then  -- 只有接收过封包才发送
                         if tx_busy = '0' then
                             if tx_rdy = '1' then
                                 tx_v <= '1';
