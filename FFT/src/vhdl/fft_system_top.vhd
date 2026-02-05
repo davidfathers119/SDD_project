@@ -210,7 +210,7 @@ begin
             fft_start <= '0';
             fft_in_valid <= '0';
             tx_v <= '0';  -- 預設不發送,由 FSM 各狀態控制
-            tx_b <= (others => '0');  -- 預設清空發送buffer,避免latch推斷
+            -- tx_b 不在 defaults 清空，由 case 各狀態明確設置
             tx_enabled <= '0';  -- 預設禁止發送,只在SEND狀態明確啟用
             
             -- 延遲一週期的tx_enabled寄存器
@@ -228,6 +228,7 @@ begin
             case ps is
                 when WAIT_H1 =>
                     -- tx_enabled 已在 defaults 中設為 '0'
+                    tx_b <= (others => '0');  -- 明確清空
                     -- 只有系統準備好才開始接收
                     if system_ready = '1' and rx_v = '1' then
                         if rx_b = RX_HEADER_H1 then
@@ -236,6 +237,7 @@ begin
                     end if;
 
                 when WAIT_H2 =>
+                    tx_b <= (others => '0');  -- 明確清空
                     if rx_v = '1' then
                         if rx_b = RX_HEADER_H2 then
                             ps <= WAIT_LEN0;
@@ -245,12 +247,14 @@ begin
                     end if;
 
                 when WAIT_LEN0 =>
+                    tx_b <= (others => '0');  -- 明確清空
                     if rx_v = '1' then
                         len0 <= rx_b;
                         ps <= WAIT_LEN1;
                     end if;
 
                 when WAIT_LEN1 =>
+                    tx_b <= (others => '0');  -- 明確清空
                     if rx_v = '1' then
                         len1 <= rx_b;
                         sample_idx <= 0;
@@ -266,6 +270,7 @@ begin
                     end if;
 
                 when RECV_PAYLOAD =>
+                    tx_b <= (others => '0');  -- 明確清空，防止洩漏
                     if rx_v = '1' then
                         case byte_in_sample is
                             when 0 => re_lo <= rx_b;
@@ -299,6 +304,7 @@ begin
                 when START_FFT =>
                     -- 暫時跳過 FFT 處理，直接發送
                     -- (此狀態目前不會被進入)
+                    tx_b <= (others => '0');  -- 明確清空
                     data_ready <= '1';
                     ps <= SEND_H1;
 
