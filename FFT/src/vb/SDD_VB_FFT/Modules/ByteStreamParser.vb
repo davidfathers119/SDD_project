@@ -7,6 +7,7 @@ Namespace Modules
     Public Class ByteStreamParser
         Public Event PacketReceived(header As UShort, length As UShort, payload As Byte())
         Public Event ParserError(reason As String)
+        Public Event DebugTrace(message As String)
 
         Private Enum State
             WaitH1
@@ -45,13 +46,16 @@ Namespace Modules
                     If b = &HAA OrElse b = &H55 Then
                         _h1 = b
                         _state = State.WaitH2
+                        RaiseEvent DebugTrace($"[Parser] Found H1=0x{b:X2}, waiting H2")
                     End If
 
                 Case State.WaitH2
                     _h2 = b
                     If (_h1 = &HAA AndAlso _h2 = &H55) OrElse (_h1 = &H55 AndAlso _h2 = &HAA) Then
                         _state = State.WaitLen0
+                        RaiseEvent DebugTrace($"[Parser] Header matched: 0x{_h1:X2}{_h2:X2}, waiting length")
                     Else
+                        RaiseEvent DebugTrace($"[Parser] Header mismatch: 0x{_h1:X2}{_h2:X2}, reset")
                         _state = State.WaitH1
                     End If
 
@@ -70,6 +74,7 @@ Namespace Modules
                         Return
                     End If
 
+                    RaiseEvent DebugTrace($"[Parser] Length={length}, expecting {_expectedPayloadBytes} bytes")
                     _payload = New Byte(_expectedPayloadBytes - 1) {}
                     _payloadOffset = 0
                     _state = State.WaitPayload

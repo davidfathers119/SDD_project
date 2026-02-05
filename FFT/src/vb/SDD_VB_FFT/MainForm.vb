@@ -32,6 +32,7 @@ Public Class MainForm
     Private ReadOnly _txtLog As New TextBox()
     Private _rxBytesTotal As Long
     Private _rxChunkCount As Integer
+    Private _rxAllBytes As New System.Collections.Generic.List(Of Byte)()
 
     Private ReadOnly _chartTime As New Chart()
     Private ReadOnly _chartFreq As New Chart()
@@ -54,6 +55,10 @@ Public Class MainForm
                                             If data Is Nothing Then Return
                                             Interlocked.Add(_rxBytesTotal, data.Length)
                                             Dim chunkIdx As Integer = Interlocked.Increment(_rxChunkCount)
+                                            ' 收集所有資料
+                                            SyncLock _rxAllBytes
+                                                _rxAllBytes.AddRange(data)
+                                            End SyncLock
                                             ' Avoid flooding UI: show only first ~30 chunks per run.
                                             If chunkIdx <= 30 Then
                                                 Log($"[RX] chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} head={BitConverter.ToString(data, 0, Math.Min(8, data.Length))}")
@@ -63,6 +68,9 @@ Public Class MainForm
                                             SetStatus($"Parser error: {msg}")
                                             Log($"[ParserError] {msg}")
                                         End Sub
+        AddHandler _parser.DebugTrace, Sub(msg)
+                                           Log(msg)
+                                       End Sub
         AddHandler _parser.PacketReceived, Sub(header, length, payload)
                                                Log($"[Packet] header=0x{header:X4} len={length} payloadBytes={If(payload Is Nothing, 0, payload.Length)}")
                                            End Sub
@@ -241,13 +249,16 @@ Public Class MainForm
                 _btnSend.Enabled = False
                 _rxChunkCount = 0
                 Interlocked.Exchange(_rxBytesTotal, 0)
+                SyncLock _rxAllBytes
+                    _rxAllBytes.Clear()
+                End SyncLock
                 _port.ClearBuffers()
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
                 Log($"[TX] bytes={packet.Length} head={preview}")
 
-                Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=8000, ct:=cts.Token)
+                Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=15000, ct:=cts.Token)
                 Dim outRe = response.Item1
                 Dim outIm = response.Item2
 
@@ -257,6 +268,24 @@ Public Class MainForm
                 PlotPhase(phase)
 
                 SetStatus("Done")
+            Catch ex As TimeoutException
+                ' Dump所有收到的資料
+                Dim allData As Byte()
+                SyncLock _rxAllBytes
+                    allData = _rxAllBytes.ToArray()
+                End SyncLock
+                If allData.Length > 0 Then
+                    Dim dumpStr As String = BitConverter.ToString(allData)
+                    Log($"[RX Dump] Total {allData.Length} bytes:")
+                    ' 分段顯示，每行32個byte
+                    Dim lineSize As Integer = 96 ' 32 bytes * 3 chars per byte
+                    For i As Integer = 0 To dumpStr.Length - 1 Step lineSize
+                        Dim len As Integer = Math.Min(lineSize, dumpStr.Length - i)
+                        Log($"  {dumpStr.Substring(i, len)}")
+                    Next
+                End If
+                SetStatus($"Timeout: {ex.Message}")
+                Log($"[Error] {ex.Message}")
             Catch ex As Exception
                 SetStatus($"Error: {ex.Message}")
                 Log($"[Error] {ex}")
