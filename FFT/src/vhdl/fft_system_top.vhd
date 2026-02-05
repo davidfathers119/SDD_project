@@ -78,6 +78,7 @@ architecture rtl of fft_system_top is
     signal out_idx : integer range 0 to FFT_N := 0;  -- 擴展範圍避免邊界檢查時溢出
     signal out_byte_sel : integer range 0 to 3 := 0;
     signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
+    signal tx_busy : std_logic := '0';  -- 標記當前byte正在發送
     
     -- 啟動延遲：防止 power-on 時信號不穩定
     signal startup_counter : integer range 0 to 1000000 := 0;
@@ -199,6 +200,7 @@ begin
             out_idx <= 0;
             out_byte_sel <= 0;
             data_ready <= '0';  -- reset 時標記資料未準備好
+            tx_busy <= '0';  -- reset 時清除發送忙碌標誌
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
@@ -285,63 +287,100 @@ begin
 
                 when SEND_H1 =>
                     led_send_header_latch <= '1';  -- 設置 latch
-                    -- 確保 tx_b 已清除舊值
                     tx_b <= TX_HEADER_H1;
-                    if tx_rdy = '1' and data_ready = '1' then
-                        tx_v <= '1';
-                        ps <= SEND_H2;
+                    if tx_busy = '0' then
+                        -- 尚未發送，等待 UART 準備好
+                        if tx_rdy = '1' and data_ready = '1' then
+                            tx_v <= '1';
+                            tx_busy <= '1';  -- 標記已發送
+                        end if;
+                    else
+                        -- 已發送，等待 UART 開始處理（tx_rdy 變 0）
+                        if tx_rdy = '0' then
+                            tx_busy <= '0';  -- 清除標誌
+                            ps <= SEND_H2;   -- 轉換狀態
+                        end if;
                     end if;
 
                 when SEND_H2 =>
-                    -- 提前設置下一個要發送的值
                     tx_b <= TX_HEADER_H2;
-                    -- 等待 UART 準備好（確保上一個 byte 已發送）
-                    if tx_rdy = '1' then
-                        tx_v <= '1';
-                        ps <= SEND_LEN0;
+                    if tx_busy = '0' then
+                        if tx_rdy = '1' then
+                            tx_v <= '1';
+                            tx_busy <= '1';
+                        end if;
+                    else
+                        if tx_rdy = '0' then
+                            tx_busy <= '0';
+                            ps <= SEND_LEN0;
+                        end if;
                     end if;
 
                 when SEND_LEN0 =>
                     tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
-                    if tx_rdy = '1' then
-                        tx_v <= '1';
-                        ps <= SEND_LEN1;
+                    if tx_busy = '0' then
+                        if tx_rdy = '1' then
+                            tx_v <= '1';
+                            tx_busy <= '1';
+                        end if;
+                    else
+                        if tx_rdy = '0' then
+                            tx_busy <= '0';
+                            ps <= SEND_LEN1;
+                        end if;
                     end if;
 
                 when SEND_LEN1 =>
                     tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
-                    if tx_rdy = '1' then
-                        tx_v <= '1';
-                        out_idx <= 0;
-                        out_byte_sel <= 0;
-                        ps <= SEND_PAYLOAD;
+                    if tx_busy = '0' then
+                        if tx_rdy = '1' then
+                            tx_v <= '1';
+                            tx_busy <= '1';
+                        end if;
+                    else
+                        if tx_rdy = '0' then
+                            tx_busy <= '0';
+                            out_idx <= 0;
+                            out_byte_sel <= 0;
+                            ps <= SEND_PAYLOAD;
+                        end if;
                     end if;
 
                 when SEND_PAYLOAD =>
                     led_send_payload_latch <= '1';  -- 設置 latch
-                    if tx_rdy = '1' then
-                        -- 回傳處理後的資料
-                        case out_byte_sel is
-                            when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
-                            when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
-                            when 2 => tx_b <= std_logic_vector(out_im_mem(out_idx)(7 downto 0));
-                            when others => tx_b <= std_logic_vector(out_im_mem(out_idx)(15 downto 8));
-                        end case;
-                        tx_v <= '1';
-
-                        if out_byte_sel = 3 then
-                            out_byte_sel <= 0;
-                            if out_idx = FFT_N-1 then
-                                -- 發送完成，重置標誌並回到等待狀態
-                                data_ready <= '0';
-                                led_send_header_latch <= '0';   -- 清除 latch
-                                led_send_payload_latch <= '0';  -- 清除 latch
-                                ps <= WAIT_H1;
+                    -- 準備要發送的資料
+                    case out_byte_sel is
+                        when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
+                        when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
+                        when 2 => tx_b <= std_logic_vector(out_im_mem(out_idx)(7 downto 0));
+                        when others => tx_b <= std_logic_vector(out_im_mem(out_idx)(15 downto 8));
+                    end case;
+                    
+                    if tx_busy = '0' then
+                        -- 尚未發送當前 byte
+                        if tx_rdy = '1' then
+                            tx_v <= '1';
+                            tx_busy <= '1';
+                        end if;
+                    else
+                        -- 已發送，等待 UART 接收（tx_rdy 變 0）
+                        if tx_rdy = '0' then
+                            tx_busy <= '0';
+                            -- 更新索引
+                            if out_byte_sel = 3 then
+                                out_byte_sel <= 0;
+                                if out_idx = FFT_N-1 then
+                                    -- 發送完成
+                                    data_ready <= '0';
+                                    led_send_header_latch <= '0';
+                                    led_send_payload_latch <= '0';
+                                    ps <= WAIT_H1;
+                                else
+                                    out_idx <= out_idx + 1;
+                                end if;
                             else
-                                out_idx <= out_idx + 1;
+                                out_byte_sel <= out_byte_sel + 1;
                             end if;
-                        else
-                            out_byte_sel <= out_byte_sel + 1;
                         end if;
                     end if;
             end case;
