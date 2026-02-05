@@ -126,12 +126,16 @@ begin
             done      => fft_done
         );
 
-    -- LED: 簡易狀態
-    led_status(0) <= rx_v;
-    led_status(1) <= tx_rdy;
-    led_status(2) <= fft_busy;
-    led_status(3) <= fft_done;
-    led_status(7 downto 4) <= (others => '0');
+    -- LED: 簡易狀態 + FSM 除錯
+    led_status(0) <= rx_v;                    -- RX 收到資料
+    led_status(1) <= tx_rdy;                  -- TX 準備
+    led_status(2) <= fft_busy;                -- FFT 運算中
+    led_status(3) <= fft_done;                -- FFT 完成
+    -- 新增：FSM 狀態除錯
+    led_status(4) <= '1' when ps = START_FFT else '0';    -- 是否在 START_FFT
+    led_status(5) <= '1' when ps = SEND_H1 or ps = SEND_H2 or ps = SEND_LEN0 or ps = SEND_LEN1 else '0';  -- 是否在發送 header
+    led_status(6) <= '1' when ps = SEND_PAYLOAD else '0'; -- 是否在發送 payload
+    led_status(7) <= '1' when ps = RECV_PAYLOAD else '0'; -- 是否在接收 payload
 
     -- packet FSM + FFT feed + TX
     process(clk25, rst_n)

@@ -59,10 +59,8 @@ Public Class MainForm
                                             SyncLock _rxAllBytes
                                                 _rxAllBytes.AddRange(data)
                                             End SyncLock
-                                            ' Avoid flooding UI: show only first ~30 chunks per run.
-                                            If chunkIdx <= 30 Then
-                                                Log($"[RX] chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} head={BitConverter.ToString(data, 0, Math.Min(8, data.Length))}")
-                                            End If
+                                            ' 顯示所有接收（用於診斷）
+                                            Log($"[RX] chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} head={BitConverter.ToString(data, 0, Math.Min(8, data.Length))}")
                                         End Sub
         AddHandler _parser.ParserError, Sub(msg)
                                             SetStatus($"Parser error: {msg}")
