@@ -59,8 +59,11 @@ Public Class MainForm
                                             SyncLock _rxAllBytes
                                                 _rxAllBytes.AddRange(data)
                                             End SyncLock
-                                            ' 顯示所有接收（用於診斷）
-                                            Log($"[RX] chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} head={BitConverter.ToString(data, 0, Math.Min(8, data.Length))}")
+                                            ' 顯示所有接收（用於診斷）- 增加時間戳
+                                            Dim timestamp As String = DateTime.Now.ToString("HH:mm:ss.fff")
+                                            Dim headLen As Integer = Math.Min(16, data.Length)
+                                            Dim hexHead As String = BitConverter.ToString(data, 0, headLen)
+                                            Log($"[RX] {timestamp} chunk={data.Length} total={Interlocked.Read(_rxBytesTotal)} hex={hexHead}")
                                         End Sub
         AddHandler _parser.ParserError, Sub(msg)
                                             SetStatus($"Parser error: {msg}")
@@ -278,7 +281,8 @@ Public Class MainForm
                     If bytesRead > 0 Then
                         Dim garbage(bytesRead - 1) As Byte
                         Dim actualRead As Integer = _port.Read(garbage, 0, bytesRead)
-                        Log($"[Cleanup] Round {cleanupRounds + 1}: 丟棄 {actualRead} bytes")
+                        Dim hexDump As String = BitConverter.ToString(garbage, 0, Math.Min(32, actualRead))
+                        Log($"[Cleanup] Round {cleanupRounds + 1}: 丟棄 {actualRead} bytes, hex={hexDump}")
                         cleanupRounds += 1
                     Else
                         ' 連續兩輪都沒有資料，認為已經清理乾淨
@@ -301,10 +305,11 @@ Public Class MainForm
                 
                 Log("[Cleanup] 清理完成，開始發送封包")
                 
+                Dim sendTime As String = DateTime.Now.ToString("HH:mm:ss.fff")
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
-                Log($"[TX] bytes={packet.Length} head={preview}")
+                Log($"[TX] {sendTime} bytes={packet.Length} head={preview}")
 
                 Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=15000, ct:=cts.Token)
                 Dim outRe = response.Item1
