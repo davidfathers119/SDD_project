@@ -204,11 +204,12 @@ begin
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
-            -- defaults
+            -- defaults (預設所有控制信號,確保不會有殘留狀態)
             fft_start <= '0';
             fft_in_valid <= '0';
-            tx_v <= '0';  -- 預設不發送，由 FSM 各狀態控制
-            tx_b <= (others => '0');  -- 預設清空發送buffer，避免latch推斷
+            tx_v <= '0';  -- 預設不發送,由 FSM 各狀態控制
+            tx_b <= (others => '0');  -- 預設清空發送buffer,避免latch推斷
+            tx_enabled <= '0';  -- 預設禁止發送,只在SEND狀態明確啟用
             -- 寄存器化UART TX接口（只在system_ready且tx_enabled時轉發）
             if system_ready = '1' and tx_enabled = '1' then
                 uart_tx_b <= tx_b;
@@ -220,7 +221,7 @@ begin
 
             case ps is
                 when WAIT_H1 =>
-                    tx_enabled <= '0';  -- 禁止發送
+                    -- tx_enabled 已在 defaults 中設為 '0'
                     -- 只有系統準備好才開始接收
                     if system_ready = '1' and rx_v = '1' then
                         if rx_b = RX_HEADER_H1 then
@@ -296,7 +297,7 @@ begin
                     ps <= SEND_H1;
 
                 when SEND_H1 =>
-                    tx_enabled <= '1';  -- 啟用發送
+                    tx_enabled <= '1';  -- 明確啟用發送
                     led_send_header_latch <= '1';  -- 設置 latch
                     tx_b <= TX_HEADER_H1;
                     if tx_busy = '0' then
@@ -314,6 +315,7 @@ begin
                     end if;
 
                 when SEND_H2 =>
+                    tx_enabled <= '1';  -- 保持發送啟用
                     tx_b <= TX_HEADER_H2;
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -328,6 +330,7 @@ begin
                     end if;
 
                 when SEND_LEN0 =>
+                    tx_enabled <= '1';  -- 保持發送啟用
                     tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -342,6 +345,7 @@ begin
                     end if;
 
                 when SEND_LEN1 =>
+                    tx_enabled <= '1';  -- 保持發送啟用
                     tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -358,6 +362,7 @@ begin
                     end if;
 
                 when SEND_PAYLOAD =>
+                    tx_enabled <= '1';  -- 保持發送啟用
                     led_send_payload_latch <= '1';  -- 設置 latch
                     -- 準備要發送的資料
                     case out_byte_sel is
@@ -383,7 +388,7 @@ begin
                                 if out_idx = FFT_N-1 then
                                     -- 發送完成
                                     data_ready <= '0';
-                                    tx_enabled <= '0';  -- 禁止發送
+                                    -- tx_enabled 會在下一週期由 defaults 自動設為 '0'
                                     led_send_header_latch <= '0';
                                     led_send_payload_latch <= '0';
                                     ps <= WAIT_H1;
