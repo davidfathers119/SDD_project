@@ -80,6 +80,7 @@ architecture rtl of fft_system_top is
     signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
     signal tx_busy : std_logic := '0';  -- 標記當前byte正在發送
     signal tx_enabled : std_logic := '0';  -- 標記是否允許發送（只在SEND狀態為'1'）
+    signal tx_enabled_reg : std_logic := '0';  -- tx_enabled的寄存器版本（延遲一週期）
     
     -- 啟動延遲：防止 power-on 時信號不穩定
     signal startup_counter : integer range 0 to 15000000 := 0;  -- 擴展範圍支援更長延遲
@@ -199,6 +200,7 @@ begin
             data_ready <= '0';  -- reset 時標記資料未準備好
             tx_busy <= '0';  -- reset 時清除發送忙碌標誌
             tx_enabled <= '0';  -- reset 時禁止發送
+            tx_enabled_reg <= '0';  -- reset 延遲信號
             uart_tx_b <= (others => '0');  -- reset UART TX buffer
             uart_tx_v <= '0';  -- reset UART TX valid
             led_send_header_latch <= '0';
@@ -210,8 +212,12 @@ begin
             tx_v <= '0';  -- 預設不發送,由 FSM 各狀態控制
             tx_b <= (others => '0');  -- 預設清空發送buffer,避免latch推斷
             tx_enabled <= '0';  -- 預設禁止發送,只在SEND狀態明確啟用
-            -- 寄存器化UART TX接口（只在system_ready且tx_enabled時轉發）
-            if system_ready = '1' and tx_enabled = '1' then
+            
+            -- 延遲一週期的tx_enabled寄存器
+            tx_enabled_reg <= tx_enabled;
+            
+            -- 寄存器化UART TX接口（使用延遲的tx_enabled_reg，避免時序問題）
+            if system_ready = '1' and tx_enabled_reg = '1' then
                 uart_tx_b <= tx_b;
                 uart_tx_v <= tx_v;
             else
