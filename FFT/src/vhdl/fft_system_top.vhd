@@ -81,7 +81,7 @@ architecture rtl of fft_system_top is
     signal tx_busy : std_logic := '0';  -- 標記當前byte正在發送
     
     -- 啟動延遲：防止 power-on 時信號不穩定
-    signal startup_counter : integer range 0 to 1000000 := 0;
+    signal startup_counter : integer range 0 to 15000000 := 0;  -- 擴展範圍支援更長延遲
     signal system_ready : std_logic := '0';
     
     -- LED latch：延長顯示時間
@@ -166,7 +166,7 @@ begin
             system_ready <= '0';
             uart_rst_n <= '0';  -- 同步生成 UART reset
         elsif rising_edge(clk25) then
-            if startup_counter < 1000000 then  -- 約 40ms @ 25MHz
+            if startup_counter < 12500000 then  -- 500ms @ 25MHz (930 bytes @ 38400 需 242ms，留雙倍餘裕)
                 startup_counter <= startup_counter + 1;
                 system_ready <= '0';
                 uart_rst_n <= '0';  -- 保持 UART reset
