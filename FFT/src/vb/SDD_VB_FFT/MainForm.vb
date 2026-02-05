@@ -35,13 +35,14 @@ Public Class MainForm
 
     Private ReadOnly _chartTime As New Chart()
     Private ReadOnly _chartFreq As New Chart()
+    Private ReadOnly _chartPhase As New Chart()
 
     Private _connected As Boolean
 
     Public Sub New()
         Text = "SDD FFT - VB.NET6 (Bring-up)"
-        Width = 1200
-        Height = 720
+        Width = 1400
+        Height = 800
 
         _service = New FftSessionService(_port, _parser)
 
@@ -116,19 +117,30 @@ Public Class MainForm
         _txtLog.ScrollBars = ScrollBars.Vertical
         _txtLog.Font = New Drawing.Font("Consolas", 9.0F)
 
-        Dim split As New SplitContainer() With {
+        ' 主分割：左側時域，右側頻域
+        Dim splitMain As New SplitContainer() With {
             .Dock = DockStyle.Fill,
             .Orientation = Orientation.Vertical,
-            .SplitterDistance = CInt(Width / 2)
+            .SplitterDistance = CInt(Width * 0.4)
+        }
+
+        ' 右側分割：上方振幅，下方相位
+        Dim splitFreq As New SplitContainer() With {
+            .Dock = DockStyle.Fill,
+            .Orientation = Orientation.Horizontal,
+            .SplitterDistance = CInt(Height * 0.35)
         }
 
         SetupChart(_chartTime, "Time Domain", "Sample", "Amplitude")
         SetupChart(_chartFreq, "Frequency Domain (Magnitude)", "Bin", "|X|")
+        SetupChart(_chartPhase, "Frequency Domain (Phase)", "Bin", "Phase (deg)")
 
-        split.Panel1.Controls.Add(_chartTime)
-        split.Panel2.Controls.Add(_chartFreq)
+        splitMain.Panel1.Controls.Add(_chartTime)
+        splitFreq.Panel1.Controls.Add(_chartFreq)
+        splitFreq.Panel2.Controls.Add(_chartPhase)
+        splitMain.Panel2.Controls.Add(splitFreq)
 
-        Controls.Add(split)
+        Controls.Add(splitMain)
         Controls.Add(topPanel)
         Controls.Add(_txtLog)
         Controls.Add(_lblStatus)
@@ -142,6 +154,10 @@ Public Class MainForm
         Dim area As New ChartArea("A")
         area.AxisX.Title = xlabel
         area.AxisY.Title = ylabel
+        
+        ' 設定Y軸自動縮放
+        area.AxisY.IsStartedFromZero = False
+        
         chart.ChartAreas.Add(area)
 
         Dim s As New Series("S")
@@ -236,7 +252,9 @@ Public Class MainForm
                 Dim outIm = response.Item2
 
                 Dim mag As Double() = SpectrumMath.Magnitude(outRe, outIm)
+                Dim phase As Double() = SpectrumMath.Phase(outRe, outIm)
                 PlotFreq(mag)
+                PlotPhase(phase)
 
                 SetStatus("Done")
             Catch ex As Exception
@@ -276,6 +294,15 @@ Public Class MainForm
         Dim half As Integer = mag.Length \ 2
         For i As Integer = 0 To half - 1
             s.Points.AddXY(i, mag(i))
+        Next
+    End Sub
+
+    Private Sub PlotPhase(phase As Double())
+        Dim s = _chartPhase.Series(0)
+        s.Points.Clear()
+        Dim half As Integer = phase.Length \ 2
+        For i As Integer = 0 To half - 1
+            s.Points.AddXY(i, phase(i))
         Next
     End Sub
 
