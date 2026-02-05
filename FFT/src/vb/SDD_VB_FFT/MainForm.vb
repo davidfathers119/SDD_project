@@ -250,7 +250,12 @@ Public Class MainForm
                 SyncLock _rxAllBytes
                     _rxAllBytes.Clear()
                 End SyncLock
+                
+                ' 清除buffer並等待FPGA穩定
                 _port.ClearBuffers()
+                Await Task.Delay(300)
+                _port.ClearBuffers()
+                
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
