@@ -143,8 +143,8 @@ begin
     -- LED: 簡易狀態 + FSM 除錯
     led_status(0) <= rx_v;                    -- RX 收到資料
     led_status(1) <= tx_rdy;                  -- TX 準備
-    led_status(2) <= fft_busy;                -- FFT 運算中
-    led_status(3) <= fft_done;                -- FFT 完成
+    led_status(2) <= '1' when sample_idx > 200 else '0';  -- 接收進度：sample_idx > 200
+    led_status(3) <= data_ready;              -- 資料準備好
     -- 新增：FSM 狀態除錯
     led_status(4) <= '1' when ps = START_FFT else '0';    -- 是否在 START_FFT
     led_status(5) <= '1' when ps = SEND_H1 or ps = SEND_H2 or ps = SEND_LEN0 or ps = SEND_LEN1 else '0';  -- 是否在發送 header
@@ -252,6 +252,7 @@ begin
 
                                 if sample_idx = FFT_N-1 then
                                     -- 接收完成，直接跳到發送（跳過 FFT 處理）
+                                    sample_idx <= 0;  -- 重置 sample_idx 準備發送
                                     data_ready <= '1';
                                     ps <= SEND_H1;
                                 else
