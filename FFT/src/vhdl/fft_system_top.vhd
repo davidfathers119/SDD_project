@@ -73,6 +73,10 @@ architecture rtl of fft_system_top is
     signal out_idx : integer range 0 to FFT_N-1 := 0;
     signal out_byte_sel : integer range 0 to 3 := 0;
     signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
+    
+    -- 啟動延遲：防止 power-on 時信號不穩定
+    signal startup_counter : integer range 0 to 1000000 := 0;
+    signal system_ready : std_logic := '0';
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -140,6 +144,23 @@ begin
     led_status(7) <= '1' when ps = RECV_PAYLOAD else '0'; -- 是否在接收 payload
 
     -- packet FSM + FFT feed + TX
+    -- 啟動延遲計數器
+    process(clk25, rst_n)
+    begin
+        if rst_n = '0' then
+            startup_counter <= 0;
+            system_ready <= '0';
+        elsif rising_edge(clk25) then
+            if startup_counter < 1000000 then  -- 約 40ms @ 25MHz
+                startup_counter <= startup_counter + 1;
+                system_ready <= '0';
+            else
+                system_ready <= '1';
+            end if;
+        end if;
+    end process;
+    
+    -- 主 FSM
     process(clk25, rst_n)
         variable length_val : integer;
     begin
@@ -153,7 +174,8 @@ begin
             re_lo <= (others => '0');
             re_hi <= (others => '0');
             im_lo <= (others => '0');
-            im_hi <= (others => '0');
+            im_hi <=-- 只有系統準備好才開始接收
+                    if system_ready = '1' andothers => '0');
 
             fft_start <= '0';
             fft_in_valid <= '0';
@@ -166,7 +188,13 @@ begin
             -- defaults
             fft_start <= '0';
             fft_in_valid <= '0';
-            tx_v <= '0';
+            -- 只有系統準備好才允許發送
+            if system_ready = '1' then
+                tx_v <= '0';
+            else
+                tx_v <= '0';
+                tx_b <= (others => '0');
+            end if;
 
             case ps is
                 when WAIT_H1 =>
