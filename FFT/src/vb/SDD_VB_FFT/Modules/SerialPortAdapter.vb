@@ -46,6 +46,27 @@ Namespace Modules
             End Get
         End Property
 
+        Public ReadOnly Property BytesToRead As Integer
+            Get
+                If Not _port.IsOpen Then Return 0
+                Try
+                    Return _port.BytesToRead
+                Catch
+                    Return 0
+                End Try
+            End Get
+        End Property
+
+        Public Function Read(buffer As Byte(), offset As Integer, count As Integer) As Integer
+            If Not _port.IsOpen Then Return 0
+            Try
+                Return _port.Read(buffer, offset, count)
+            Catch ex As Exception
+                RaiseEvent PortError($"Read failed: {ex.Message}")
+                Return 0
+            End Try
+        End Function
+
         Public Sub Open(portName As String, baudRate As Integer)
             Try
                 If _port.IsOpen Then _port.Close()
