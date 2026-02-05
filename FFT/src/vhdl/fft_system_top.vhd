@@ -206,30 +206,18 @@ begin
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
-            -- defaults (預設所有控制信號,確保不會有殘留狀態)
+            -- defaults (預設所有控制信號)
             fft_start <= '0';
             fft_in_valid <= '0';
-            tx_v <= '0';  -- 預設不發送,由 FSM 各狀態控制
-            -- tx_b 不在 defaults 清空，由 case 各狀態明確設置
-            tx_enabled <= '0';  -- 預設禁止發送,只在SEND狀態明確啟用
+            tx_v <= '0';
+            tx_enabled <= '0';
             
-            -- 延遲一週期的tx_enabled寄存器
+            -- 更新延遲寄存器
             tx_enabled_reg <= tx_enabled;
-            
-            -- 寄存器化UART TX接口（使用延遲的tx_enabled_reg，避免時序問題）
-            if system_ready = '1' and tx_enabled_reg = '1' then
-                uart_tx_b <= tx_b;
-                uart_tx_v <= tx_v;
-            else
-                uart_tx_b <= (others => '0');
-                uart_tx_v <= '0';
-            end if;
 
             case ps is
                 when WAIT_H1 =>
-                    -- tx_enabled 已在 defaults 中設為 '0'
-                    tx_b <= (others => '0');  -- 明確清空
-                    -- 只有系統準備好才開始接收
+                    tx_b <= (others => '0');
                     if system_ready = '1' and rx_v = '1' then
                         if rx_b = RX_HEADER_H1 then
                             ps <= WAIT_H2;
@@ -237,7 +225,7 @@ begin
                     end if;
 
                 when WAIT_H2 =>
-                    tx_b <= (others => '0');  -- 明確清空
+                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         if rx_b = RX_HEADER_H2 then
                             ps <= WAIT_LEN0;
@@ -247,14 +235,14 @@ begin
                     end if;
 
                 when WAIT_LEN0 =>
-                    tx_b <= (others => '0');  -- 明確清空
+                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         len0 <= rx_b;
                         ps <= WAIT_LEN1;
                     end if;
 
                 when WAIT_LEN1 =>
-                    tx_b <= (others => '0');  -- 明確清空
+                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         len1 <= rx_b;
                         sample_idx <= 0;
@@ -264,13 +252,12 @@ begin
                         if length_val = FFT_N then
                             ps <= RECV_PAYLOAD;
                         else
-                            -- 長度不符：丟棄，重新等 header
                             ps <= WAIT_H1;
                         end if;
                     end if;
 
                 when RECV_PAYLOAD =>
-                    tx_b <= (others => '0');  -- 明確清空，防止洩漏
+                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         case byte_in_sample is
                             when 0 => re_lo <= rx_b;
@@ -278,15 +265,13 @@ begin
                             when 2 => im_lo <= rx_b;
                             when others =>
                                 im_hi <= rx_b;
-                                -- commit one sample (同時寫入輸入和輸出緩衝區)
                                 in_re_mem(sample_idx) <= to_s16(re_lo, re_hi);
                                 in_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
-                                out_re_mem(sample_idx) <= to_s16(re_lo, re_hi);  -- 直接複製到輸出
-                                out_im_mem(sample_idx) <= to_s16(im_lo, rx_b);   -- 直接複製到輸出
+                                out_re_mem(sample_idx) <= to_s16(re_lo, re_hi);
+                                out_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
 
                                 if sample_idx = FFT_N-1 then
-                                    -- 接收完成，直接跳到發送（跳過 FFT 處理）
-                                    sample_idx <= 0;  -- 重置 sample_idx 準備發送
+                                    sample_idx <= 0;
                                     data_ready <= '1';
                                     ps <= SEND_H1;
                                 else
@@ -302,32 +287,28 @@ begin
                     end if;
 
                 when START_FFT =>
-                    -- 暫時跳過 FFT 處理，直接發送
-                    -- (此狀態目前不會被進入)
-                    tx_b <= (others => '0');  -- 明確清空
+                    tx_b <= (others => '0');
                     data_ready <= '1';
                     ps <= SEND_H1;
 
                 when SEND_H1 =>
-                    tx_enabled <= '1';  -- 明確啟用發送
-                    led_send_header_latch <= '1';  -- 設置 latch
+                    tx_enabled <= '1';
+                    led_send_header_latch <= '1';
                     tx_b <= TX_HEADER_H1;
                     if tx_busy = '0' then
-                        -- 尚未發送，等待 UART 準備好
                         if tx_rdy = '1' and data_ready = '1' then
                             tx_v <= '1';
-                            tx_busy <= '1';  -- 標記已發送
+                            tx_busy <= '1';
                         end if;
                     else
-                        -- 已發送，等待 UART 開始處理（tx_rdy 變 0）
                         if tx_rdy = '0' then
-                            tx_busy <= '0';  -- 清除標誌
-                            ps <= SEND_H2;   -- 轉換狀態
+                            tx_busy <= '0';
+                            ps <= SEND_H2;
                         end if;
                     end if;
 
                 when SEND_H2 =>
-                    tx_enabled <= '1';  -- 保持發送啟用
+                    tx_enabled <= '1';
                     tx_b <= TX_HEADER_H2;
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -342,7 +323,7 @@ begin
                     end if;
 
                 when SEND_LEN0 =>
-                    tx_enabled <= '1';  -- 保持發送啟用
+                    tx_enabled <= '1';
                     tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -357,7 +338,7 @@ begin
                     end if;
 
                 when SEND_LEN1 =>
-                    tx_enabled <= '1';  -- 保持發送啟用
+                    tx_enabled <= '1';
                     tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -374,9 +355,8 @@ begin
                     end if;
 
                 when SEND_PAYLOAD =>
-                    tx_enabled <= '1';  -- 保持發送啟用
-                    led_send_payload_latch <= '1';  -- 設置 latch
-                    -- 準備要發送的資料
+                    tx_enabled <= '1';
+                    led_send_payload_latch <= '1';
                     case out_byte_sel is
                         when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
                         when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
@@ -385,22 +365,17 @@ begin
                     end case;
                     
                     if tx_busy = '0' then
-                        -- 尚未發送當前 byte
                         if tx_rdy = '1' then
                             tx_v <= '1';
                             tx_busy <= '1';
                         end if;
                     else
-                        -- 已發送，等待 UART 接收（tx_rdy 變 0）
                         if tx_rdy = '0' then
                             tx_busy <= '0';
-                            -- 更新索引
                             if out_byte_sel = 3 then
                                 out_byte_sel <= 0;
                                 if out_idx = FFT_N-1 then
-                                    -- 發送完成
                                     data_ready <= '0';
-                                    -- tx_enabled 會在下一週期由 defaults 自動設為 '0'
                                     led_send_header_latch <= '0';
                                     led_send_payload_latch <= '0';
                                     ps <= WAIT_H1;
@@ -414,6 +389,24 @@ begin
                     end if;
             end case;
 
+        end if;
+    end process;
+    
+    -- 獨立的UART TX控制process（完全隔離）
+    process(clk25, rst_n)
+    begin
+        if rst_n = '0' then
+            uart_tx_b <= (others => '0');
+            uart_tx_v <= '0';
+        elsif rising_edge(clk25) then
+            -- 只在系統準備且發送啟用時轉發
+            if system_ready = '1' and tx_enabled_reg = '1' then
+                uart_tx_b <= tx_b;
+                uart_tx_v <= tx_v;
+            else
+                uart_tx_b <= (others => '0');
+                uart_tx_v <= '0';
+            end if;
         end if;
     end process;
 
