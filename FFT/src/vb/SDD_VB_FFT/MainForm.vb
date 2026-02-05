@@ -251,10 +251,25 @@ Public Class MainForm
                     _rxAllBytes.Clear()
                 End SyncLock
                 
-                ' 清除buffer並等待FPGA穩定
+                ' 清除 buffer 並等待 FPGA 發送完殘留垃圾資料
                 _port.ClearBuffers()
-                Await Task.Delay(300)
+                Await Task.Delay(1000)  ' 等待 1 秒讓 FPGA TX 緩衝區清空
+                
+                ' 主動讀取並丟棄所有殘留資料
+                Dim garbageCount As Integer = 0
+                While _port.BytesToRead > 0
+                    Dim garbage(_port.BytesToRead - 1) As Byte
+                    garbageCount += _port.Read(garbage, 0, garbage.Length)
+                    Await Task.Delay(50)  ' 等待更多資料
+                End While
+                
+                If garbageCount > 0 Then
+                    Log($"[Garbage] 丟棄 {garbageCount} bytes 殘留資料")
+                End If
+                
+                ' 最後再清一次確保乾淨
                 _port.ClearBuffers()
+                Await Task.Delay(100)
                 
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
