@@ -212,6 +212,7 @@ begin
                                 in_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
 
                                 if sample_idx = FFT_N-1 then
+                                    sample_idx <= 0;  -- 重置 sample_idx 準備 FFT
                                     ps <= START_FFT;
                                 else
                                     sample_idx <= sample_idx + 1;
