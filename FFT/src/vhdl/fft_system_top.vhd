@@ -91,17 +91,32 @@ begin
         end if;
     end process;
 
-    u_link: entity work.rs232_link
+    -- 使用全新简化UART模块 (专为TTL设计)
+    u_tx: entity work.uart_tx_simple
+        generic map(
+            CLK_FREQ  => 25000000,
+            BAUD_RATE => 38400
+        )
         port map(
             clk      => clk25,
             rst_n    => rst_n,
-            rx       => uart_rx,
-            tx       => uart_tx,
-            rx_data  => rx_b,
-            rx_valid => rx_v,
             tx_data  => tx_b,
             tx_valid => tx_v,
-            tx_ready => tx_rdy
+            tx_ready => tx_rdy,
+            tx       => uart_tx
+        );
+    
+    u_rx: entity work.uart_rx_simple
+        generic map(
+            CLK_FREQ  => 25000000,
+            BAUD_RATE => 38400
+        )
+        port map(
+            clk      => clk25,
+            rst_n    => rst_n,
+            rx_data  => rx_b,
+            rx_valid => rx_v,
+            rx       => uart_rx
         );
     
     u_fft: entity work.fft_core_stub
