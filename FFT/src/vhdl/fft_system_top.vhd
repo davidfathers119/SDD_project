@@ -226,23 +226,23 @@ begin
                     end if;
 
                 when START_FFT =>
-                    -- 先用 stub：把記憶體資料餵進去
-                    fft_start <= '1';
-                    sample_idx <= 0;
-                    ps <= START_FFT; -- 留在此狀態直到送完
-
-                    -- start 後的第一拍就開始送資料
-                    fft_in_re <= in_re_mem(0);
-                    fft_in_im <= in_im_mem(0);
-                    fft_in_valid <= '1';
-                    if FFT_N = 1 then
-                        ps <= SEND_H1;
-                    else
+                    -- 初始化並開始餵 FFT
+                    if sample_idx = 0 then
+                        fft_start <= '1';
+                        fft_in_re <= in_re_mem(0);
+                        fft_in_im <= in_im_mem(0);
+                        fft_in_valid <= '1';
                         sample_idx <= 1;
-                        ps <= START_FFT;
+                    elsif sample_idx < FFT_N then
+                        -- 繼續餵資料
+                        fft_in_re <= in_re_mem(sample_idx);
+                        fft_in_im <= in_im_mem(sample_idx);
+                        fft_in_valid <= '1';
+                        sample_idx <= sample_idx + 1;
+                    else
+                        -- 全部送完，進入發送階段
+                        ps <= SEND_H1;
                     end if;
-
-                    -- 下一拍開始持續送；用另一段邏輯（下面）
 
                 when SEND_H1 =>
                     if tx_rdy = '1' then
@@ -297,22 +297,6 @@ begin
                         end if;
                     end if;
             end case;
-
-            -- 持續餵 FFT stub（在 START_FFT 狀態）
-            if ps = START_FFT then
-                if sample_idx < FFT_N then
-                    fft_in_re <= in_re_mem(sample_idx);
-                    fft_in_im <= in_im_mem(sample_idx);
-                    fft_in_valid <= '1';
-                    if sample_idx = FFT_N-1 then
-                        ps <= SEND_H1;
-                    else
-                        sample_idx <= sample_idx + 1;
-                    end if;
-                else
-                    ps <= SEND_H1;
-                end if;
-            end if;
 
         end if;
     end process;
