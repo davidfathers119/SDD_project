@@ -251,25 +251,42 @@ Public Class MainForm
                     _rxAllBytes.Clear()
                 End SyncLock
                 
-                ' 清除 buffer 並等待 FPGA 發送完殘留垃圾資料
-                _port.ClearBuffers()
-                Await Task.Delay(1000)  ' 等待 1 秒讓 FPGA TX 緩衝區清空
+                ' 積極清理策略：重複清理直到穩定
+                Log("[Cleanup] 開始清理 FPGA 緩衝區...")
+                Dim cleanupRounds As Integer = 0
+                Dim maxRounds As Integer = 10
                 
-                ' 主動讀取並丟棄所有殘留資料
-                Dim garbageCount As Integer = 0
-                While _port.BytesToRead > 0
-                    Dim garbage(_port.BytesToRead - 1) As Byte
-                    garbageCount += _port.Read(garbage, 0, garbage.Length)
-                    Await Task.Delay(50)  ' 等待更多資料
+                While cleanupRounds < maxRounds
+                    _port.ClearBuffers()
+                    Await Task.Delay(500)  ' 等待 500ms
+                    
+                    ' 檢查是否有新資料
+                    Dim bytesRead As Integer = _port.BytesToRead
+                    If bytesRead > 0 Then
+                        Dim garbage(bytesRead - 1) As Byte
+                        Dim actualRead As Integer = _port.Read(garbage, 0, bytesRead)
+                        Log($"[Cleanup] Round {cleanupRounds + 1}: 丟棄 {actualRead} bytes")
+                        cleanupRounds += 1
+                    Else
+                        ' 連續兩輪都沒有資料，認為已經清理乾淨
+                        If cleanupRounds > 0 Then
+                            Exit While
+                        End If
+                        cleanupRounds += 1
+                    End If
                 End While
                 
-                If garbageCount > 0 Then
-                    Log($"[Garbage] 丟棄 {garbageCount} bytes 殘留資料")
-                End If
+                ' 最後清理通過事件接收的資料
+                SyncLock _rxAllBytes
+                    If _rxAllBytes.Count > 0 Then
+                        Log($"[Cleanup] 清除事件緩衝區 {_rxAllBytes.Count} bytes")
+                        _rxAllBytes.Clear()
+                    End If
+                End SyncLock
+                _rxChunkCount = 0
+                Interlocked.Exchange(_rxBytesTotal, 0)
                 
-                ' 最後再清一次確保乾淨
-                _port.ClearBuffers()
-                Await Task.Delay(100)
+                Log("[Cleanup] 清理完成，開始發送封包")
                 
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
