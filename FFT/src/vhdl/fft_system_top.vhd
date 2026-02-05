@@ -147,11 +147,11 @@ begin
 
     -- LED: 簡易狀態 + FSM 除錯
     led_status(0) <= system_ready;            -- 系統準備好（40ms 延遲後）
-    led_status(1) <= '1' when sample_idx > 50 else '0';   -- 接收進度：> 50
-    led_status(2) <= '1' when sample_idx > 150 else '0';  -- 接收進度：> 150
-    led_status(3) <= '1' when sample_idx > 230 else '0';  -- 接收進度：> 230
+    led_status(1) <= tx_rdy;                  -- TX 準備好（關鍵！）
+    led_status(2) <= '1' when sample_idx = FFT_N-1 else '0';  -- sample_idx = 255（最後一個樣本）
+    led_status(3) <= '1' when ps = SEND_H1 else '0';  -- 在 SEND_H1 狀態
     -- 新增：FSM 狀態除錯
-    led_status(4) <= '1' when ps = START_FFT else '0';    -- 是否在 START_FFT
+    led_status(4) <= '1' when ps = WAIT_H1 else '0';  -- 在 WAIT_H1 狀態
     led_status(5) <= led_send_header_latch;   -- 曾經發送 header（latch）
     led_status(6) <= led_send_payload_latch;  -- 曾經發送 payload（latch）
     led_status(7) <= '1' when ps = RECV_PAYLOAD else '0'; -- 是否在接收 payload
