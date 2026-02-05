@@ -56,6 +56,7 @@ architecture rtl of fft_system_top is
 
     type mem_t is array (0 to FFT_N-1) of signed(DATA_W-1 downto 0);
     signal in_re_mem, in_im_mem : mem_t;
+    signal out_re_mem, out_im_mem : mem_t;  -- 輸出緩衝區
 
     signal re_lo, re_hi, im_lo, im_hi : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -278,12 +279,12 @@ begin
 
                 when SEND_PAYLOAD =>
                     if tx_rdy = '1' then
-                        -- 目前 stub：回傳原始資料（之後換成 fft_out_* 或 buffer）
+                        -- 回傳處理後的資料
                         case out_byte_sel is
-                            when 0 => tx_b <= std_logic_vector(in_re_mem(out_idx)(7 downto 0));
-                            when 1 => tx_b <= std_logic_vector(in_re_mem(out_idx)(15 downto 8));
-                            when 2 => tx_b <= std_logic_vector(in_im_mem(out_idx)(7 downto 0));
-                            when others => tx_b <= std_logic_vector(in_im_mem(out_idx)(15 downto 8));
+                            when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
+                            when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
+                            when 2 => tx_b <= std_logic_vector(out_im_mem(out_idx)(7 downto 0));
+                            when others => tx_b <= std_logic_vector(out_im_mem(out_idx)(15 downto 8));
                         end case;
                         tx_v <= '1';
 
