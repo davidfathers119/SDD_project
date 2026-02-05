@@ -72,6 +72,7 @@ architecture rtl of fft_system_top is
     -- send side
     signal out_idx : integer range 0 to FFT_N-1 := 0;
     signal out_byte_sel : integer range 0 to 3 := 0;
+    signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -160,6 +161,7 @@ begin
             tx_b <= (others => '0');
             out_idx <= 0;
             out_byte_sel <= 0;
+            data_ready <= '0';  -- reset 時標記資料未準備好
         elsif rising_edge(clk25) then
             -- defaults
             fft_start <= '0';
@@ -243,11 +245,12 @@ begin
                         sample_idx <= sample_idx + 1;
                     else
                         -- 全部處理完，準備發送，重置 sample_idx
-                        sample_idx <= 0;
+                        data_ready <= '1';  -- 標記資料已準備好
                         ps <= SEND_H1;
                     end if;
 
                 when SEND_H1 =>
+                    if tx_rdy = '1' and data_rea1 =>
                     if tx_rdy = '1' then
                         tx_b <= TX_HEADER_H1;
                         tx_v <= '1';
