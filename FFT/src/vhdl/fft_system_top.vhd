@@ -211,9 +211,6 @@ begin
             fft_in_valid <= '0';
             tx_v <= '0';
             tx_enabled <= '0';
-            
-            -- 更新延遲寄存器
-            tx_enabled_reg <= tx_enabled;
 
             case ps is
                 when WAIT_H1 =>
@@ -388,6 +385,9 @@ begin
                         end if;
                     end if;
             end case;
+            
+            -- 在case之後更新延遲寄存器（確保讀取到case設置的值）
+            tx_enabled_reg <= tx_enabled;
 
         end if;
     end process;
