@@ -244,13 +244,16 @@ begin
                             when 2 => im_lo <= rx_b;
                             when others =>
                                 im_hi <= rx_b;
-                                -- commit one sample
+                                -- commit one sample (同時寫入輸入和輸出緩衝區)
                                 in_re_mem(sample_idx) <= to_s16(re_lo, re_hi);
                                 in_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
+                                out_re_mem(sample_idx) <= to_s16(re_lo, re_hi);  -- 直接複製到輸出
+                                out_im_mem(sample_idx) <= to_s16(im_lo, rx_b);   -- 直接複製到輸出
 
                                 if sample_idx = FFT_N-1 then
-                                    sample_idx <= 0;  -- 重置 sample_idx 準備 FFT
-                                    ps <= START_FFT;
+                                    -- 接收完成，直接跳到發送（跳過 FFT 處理）
+                                    data_ready <= '1';
+                                    ps <= SEND_H1;
                                 else
                                     sample_idx <= sample_idx + 1;
                                 end if;
@@ -264,21 +267,10 @@ begin
                     end if;
 
                 when START_FFT =>
-                    -- 初始化並開始餵 FFT (簡化 stub 版本：直接複製到輸出)
-                    fft_start <= '0';
-                    fft_in_valid <= '0';
-                    
-                    if sample_idx = FFT_N then
-                        -- 全部處理完（已處理 0~255 共 256 個樣本），準備發送
-                        sample_idx <= 0;
-                        data_ready <= '1';  -- 標記資料已準備好
-                        ps <= SEND_H1;
-                    else
-                        -- 繼續處理下一個樣本
-                        out_re_mem(sample_idx) <= in_re_mem(sample_idx);
-                        out_im_mem(sample_idx) <= in_im_mem(sample_idx);
-                        sample_idx <= sample_idx + 1;  -- 0->1->...->255->256
-                    end if;
+                    -- 暫時跳過 FFT 處理，直接發送
+                    -- (此狀態目前不會被進入)
+                    data_ready <= '1';
+                    ps <= SEND_H1;
 
                 when SEND_H1 =>
                     if tx_rdy = '1' and data_ready = '1' then
