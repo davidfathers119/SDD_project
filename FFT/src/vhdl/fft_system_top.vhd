@@ -245,13 +245,13 @@ begin
                         sample_idx <= sample_idx + 1;
                     else
                         -- 全部處理完，準備發送，重置 sample_idx
+                        sample_idx <= 0;
                         data_ready <= '1';  -- 標記資料已準備好
                         ps <= SEND_H1;
                     end if;
 
                 when SEND_H1 =>
-                    if tx_rdy = '1' and data_rea1 =>
-                    if tx_rdy = '1' then
+                    if tx_rdy = '1' and data_ready = '1' then
                         tx_b <= TX_HEADER_H1;
                         tx_v <= '1';
                         ps <= SEND_H2;
