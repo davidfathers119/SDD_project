@@ -32,6 +32,10 @@ architecture rtl of fft_system_top is
     signal tx_b    : std_logic_vector(7 downto 0) := (others => '0');
     signal tx_v    : std_logic := '0';
     signal tx_rdy  : std_logic;
+    
+    -- UART 實際連接信號（加入 system_ready 控制）
+    signal uart_tx_b : std_logic_vector(7 downto 0);
+    signal uart_tx_v : std_logic;
 
     -- packet parser
     type pstate_t is (
@@ -108,10 +112,14 @@ begin
             tx       => uart_tx,
             rx_data  => rx_b,
             rx_valid => rx_v,
-            tx_data  => tx_b,
-            tx_valid => tx_v,
+            tx_data  => uart_tx_b,
+            tx_valid => uart_tx_v,
             tx_ready => tx_rdy
         );
+    
+    -- 只有系統準備好才允許發送到 UART
+    uart_tx_b <= tx_b when system_ready = '1' else (others => '0');
+    uart_tx_v <= tx_v when system_ready = '1' else '0';
 
     u_fft: entity work.fft_core_stub
         generic map(
