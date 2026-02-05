@@ -29,7 +29,9 @@ architecture rtl of fft_system_top is
     signal rx_v_gated : std_logic;  -- 受system_stable控制的rx_valid
     signal tx_b    : std_logic_vector(7 downto 0) := (others => '0');
     signal tx_v    : std_logic := '0';
+    signal tx_v_gated : std_logic;  -- 受system_stable控制的tx_valid
     signal tx_rdy  : std_logic;
+    signal uart_tx_rst_n : std_logic;  -- 受system_stable控制的UART TX reset
 
     -- packet parser
     type pstate_t is (
@@ -107,9 +109,9 @@ begin
         )
         port map(
             clk      => clk25,
-            rst_n    => rst_n,
+            rst_n    => uart_tx_rst_n,  -- 受system_stable控制
             tx_data  => tx_b,
-            tx_valid => tx_v,
+            tx_valid => tx_v_gated,      -- 受system_stable控制
             tx_ready => tx_rdy,
             tx       => uart_tx
         );
@@ -158,6 +160,12 @@ begin
 
     -- RX valid gating: 只有系统稳定后才接受RX数据
     rx_v_gated <= rx_v when system_stable = '1' else '0';
+    
+    -- TX valid gating: 只有系统稳定后才允许发送TX数据
+    tx_v_gated <= tx_v when system_stable = '1' else '0';
+    
+    -- UART TX reset gating: 系统未稳定时保持UART TX在reset状态(TX线=idle高电平)
+    uart_tx_rst_n <= rst_n and system_stable;
 
     -- Power-on启动延迟
     process(clk25, rst_n)
