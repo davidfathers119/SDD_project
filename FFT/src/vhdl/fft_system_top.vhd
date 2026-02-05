@@ -294,6 +294,8 @@ begin
                         if out_byte_sel = 3 then
                             out_byte_sel <= 0;
                             if out_idx = FFT_N-1 then
+                                -- 發送完成，重置標誌並回到等待狀態
+                                data_ready <= '0';
                                 ps <= WAIT_H1;
                             else
                                 out_idx <= out_idx + 1;
