@@ -210,6 +210,7 @@ begin
             fft_start <= '0';
             fft_in_valid <= '0';
             tx_v <= '0';  -- 預設不發送，由 FSM 各狀態控制
+            tx_b <= (others => '0');  -- 預設清空發送buffer，避免latch推斷
 
             case ps is
                 when WAIT_H1 =>
