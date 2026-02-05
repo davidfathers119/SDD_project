@@ -82,6 +82,10 @@ architecture rtl of fft_system_top is
     -- 啟動延遲：防止 power-on 時信號不穩定
     signal startup_counter : integer range 0 to 1000000 := 0;
     signal system_ready : std_logic := '0';
+    
+    -- LED latch：延長顯示時間
+    signal led_send_header_latch : std_logic := '0';
+    signal led_send_payload_latch : std_logic := '0';
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -118,8 +122,7 @@ begin
             tx_ready => tx_rdy
         );
     
-    -- 只有系統準備好才釋放 UART reset 並允許發送
-    uart_rst_n <= rst_n and system_ready;  -- system_ready='0' 時強制 UART reset
+    -- 只有系統準備好才允許發送（uart_rst_n 在 process 中同步生成）
     uart_tx_b <= tx_b when system_ready = '1' else (others => '0');
     uart_tx_v <= tx_v when system_ready = '1' else '0';
 
@@ -149,8 +152,8 @@ begin
     led_status(3) <= data_ready;              -- 資料準備好
     -- 新增：FSM 狀態除錯
     led_status(4) <= '1' when ps = START_FFT else '0';    -- 是否在 START_FFT
-    led_status(5) <= '1' when ps = SEND_H1 or ps = SEND_H2 or ps = SEND_LEN0 or ps = SEND_LEN1 else '0';  -- 是否在發送 header
-    led_status(6) <= '1' when ps = SEND_PAYLOAD else '0'; -- 是否在發送 payload
+    led_status(5) <= led_send_header_latch;   -- 曾經發送 header（latch）
+    led_status(6) <= led_send_payload_latch;  -- 曾經發送 payload（latch）
     led_status(7) <= '1' when ps = RECV_PAYLOAD else '0'; -- 是否在接收 payload
 
     -- packet FSM + FFT feed + TX
@@ -160,12 +163,15 @@ begin
         if rst_n = '0' then
             startup_counter <= 0;
             system_ready <= '0';
+            uart_rst_n <= '0';  -- 同步生成 UART reset
         elsif rising_edge(clk25) then
             if startup_counter < 1000000 then  -- 約 40ms @ 25MHz
                 startup_counter <= startup_counter + 1;
                 system_ready <= '0';
+                uart_rst_n <= '0';  -- 保持 UART reset
             else
                 system_ready <= '1';
+                uart_rst_n <= '1';  -- 釋放 UART reset
             end if;
         end if;
     end process;
@@ -193,6 +199,8 @@ begin
             out_idx <= 0;
             out_byte_sel <= 0;
             data_ready <= '0';  -- reset 時標記資料未準備好
+            led_send_header_latch <= '0';
+            led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
             -- defaults
             fft_start <= '0';
@@ -276,6 +284,7 @@ begin
                     ps <= SEND_H1;
 
                 when SEND_H1 =>
+                    led_send_header_latch <= '1';  -- 設置 latch
                     if tx_rdy = '1' and data_ready = '1' then
                         tx_b <= TX_HEADER_H1;
                         tx_v <= '1';
@@ -306,6 +315,7 @@ begin
                     end if;
 
                 when SEND_PAYLOAD =>
+                    led_send_payload_latch <= '1';  -- 設置 latch
                     if tx_rdy = '1' then
                         -- 回傳處理後的資料
                         case out_byte_sel is
@@ -321,6 +331,8 @@ begin
                             if out_idx = FFT_N-1 then
                                 -- 發送完成，重置標誌並回到等待狀態
                                 data_ready <= '0';
+                                led_send_header_latch <= '0';   -- 清除 latch
+                                led_send_payload_latch <= '0';  -- 清除 latch
                                 ps <= WAIT_H1;
                             else
                                 out_idx <= out_idx + 1;
