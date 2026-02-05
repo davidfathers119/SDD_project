@@ -174,8 +174,7 @@ begin
             re_lo <= (others => '0');
             re_hi <= (others => '0');
             im_lo <= (others => '0');
-            im_hi <=-- 只有系統準備好才開始接收
-                    if system_ready = '1' andothers => '0');
+            im_hi <= (others => '0');
 
             fft_start <= '0';
             fft_in_valid <= '0';
@@ -198,7 +197,8 @@ begin
 
             case ps is
                 when WAIT_H1 =>
-                    if rx_v = '1' then
+                    -- 只有系統準備好才開始接收
+                    if system_ready = '1' and rx_v = '1' then
                         if rx_b = RX_HEADER_H1 then
                             ps <= WAIT_H2;
                         end if;
