@@ -71,6 +71,10 @@ architecture rtl of fft_system_top is
     
     -- 启动保护：只有接收到完整封包后才允许发送
     signal rx_packet_received : std_logic := '0';
+    
+    -- Power-on延迟：防止FPGA配置完成后立即误发送
+    signal startup_delay_counter : integer range 0 to 12500000 := 0;  -- 500ms @ 25MHz
+    signal system_stable : std_logic := '0';
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -142,7 +146,7 @@ begin
         );
 
     -- LED: 簡易狀態指示
-    led_status(0) <= '1' when ps = WAIT_H1 else '0';
+    led_status(0) <= system_stable;  -- 系统稳定指示灯
     led_status(1) <= '1' when ps = RECV_PAYLOAD else '0';
     led_status(2) <= '1' when ps = SEND_H1 or ps = SEND_H2 else '0';
     led_status(3) <= '1' when ps = SEND_PAYLOAD else '0';
@@ -150,6 +154,22 @@ begin
     led_status(5) <= tx_v;
     led_status(6) <= '1' when sample_idx = FFT_N-1 else '0';
     led_status(7) <= '1' when out_idx = FFT_N-1 else '0';
+
+    -- Power-on启动延迟
+    process(clk25, rst_n)
+    begin
+        if rst_n = '0' then
+            startup_delay_counter <= 0;
+            system_stable <= '0';
+        elsif rising_edge(clk25) then
+            if startup_delay_counter < 12500000 then  -- 500ms延迟
+                startup_delay_counter <= startup_delay_counter + 1;
+                system_stable <= '0';
+            else
+                system_stable <= '1';
+            end if;
+        end if;
+    end process;
 
     -- 主FSM
     process(clk25, rst_n)
@@ -181,7 +201,7 @@ begin
 
             case ps is
                 when WAIT_H1 =>
-                    if rx_v = '1' and rx_b = RX_HEADER_H1 then
+                    if system_stable = '1' and rx_v = '1' and rx_b = RX_HEADER_H1 then
                         ps <= WAIT_H2;
                     end if;
 
@@ -243,7 +263,8 @@ begin
 
                 when SEND_H1 =>
                     tx_b <= TX_HEADER_H1;
-                    if rx_packet_received = '1' then  -- 只有接收过封包才发送
+                    -- 双重保护：系统必须稳定 且 已接收封包
+                    if system_stable = '1' and rx_packet_received = '1' then
                         if tx_busy = '0' then
                             if tx_rdy = '1' then
                                 tx_v <= '1';
