@@ -83,7 +83,9 @@ begin
             sample_tick <= '0';
         elsif rising_edge(clk) then
             sample_tick <= '0';
-            if baud_tick = '1' then
+            if state = IDLE then
+                sample_counter <= 0;  -- IDLE时重置
+            elsif baud_tick = '1' then
                 if sample_counter = OVERSAMPLE-1 then
                     sample_counter <= 0;
                     sample_tick <= '1';  -- 在bit中间采样
@@ -109,7 +111,6 @@ begin
             case state is
                 when IDLE =>
                     bit_counter <= 0;
-                    sample_counter <= 0;
                     
                     -- 检测start bit (下降沿: 从1到0)
                     if rx_sync(1) = '0' then
