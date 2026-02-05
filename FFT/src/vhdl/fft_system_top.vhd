@@ -201,8 +201,6 @@ begin
             tx_busy <= '0';  -- reset 時清除發送忙碌標誌
             tx_enabled <= '0';  -- reset 時禁止發送
             tx_enabled_reg <= '0';  -- reset 延遲信號
-            uart_tx_b <= (others => '0');  -- reset UART TX buffer
-            uart_tx_v <= '0';  -- reset UART TX valid
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
