@@ -55,7 +55,7 @@ architecture rtl of fft_system_top is
     constant TX_HEADER_H2 : std_logic_vector(7 downto 0) := x"AA";
 
     signal len0, len1 : std_logic_vector(7 downto 0) := (others => '0');
-    signal sample_idx : integer range 0 to FFT_N-1 := 0;
+    signal sample_idx : integer range 0 to FFT_N := 0;  -- 擴展到 FFT_N 避免 START_FFT 溢出
     signal byte_in_sample : integer range 0 to 3 := 0;
 
     type mem_t is array (0 to FFT_N-1) of signed(DATA_W-1 downto 0);
@@ -74,7 +74,7 @@ architecture rtl of fft_system_top is
     signal fft_busy, fft_done : std_logic;
 
     -- send side
-    signal out_idx : integer range 0 to FFT_N-1 := 0;
+    signal out_idx : integer range 0 to FFT_N := 0;  -- 擴展範圍避免邊界檢查時溢出
     signal out_byte_sel : integer range 0 to 3 := 0;
     signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
     
@@ -268,16 +268,16 @@ begin
                     fft_start <= '0';
                     fft_in_valid <= '0';
                     
-                    if sample_idx < FFT_N then
-                        -- 簡單複製資料 (stub FFT)
-                        out_re_mem(sample_idx) <= in_re_mem(sample_idx);
-                        out_im_mem(sample_idx) <= in_im_mem(sample_idx);
-                        sample_idx <= sample_idx + 1;
-                    else
-                        -- 全部處理完，準備發送，重置 sample_idx
+                    if sample_idx = FFT_N then
+                        -- 全部處理完（已處理 0~255 共 256 個樣本），準備發送
                         sample_idx <= 0;
                         data_ready <= '1';  -- 標記資料已準備好
                         ps <= SEND_H1;
+                    else
+                        -- 繼續處理下一個樣本
+                        out_re_mem(sample_idx) <= in_re_mem(sample_idx);
+                        out_im_mem(sample_idx) <= in_im_mem(sample_idx);
+                        sample_idx <= sample_idx + 1;  -- 0->1->...->255->256
                     end if;
 
                 when SEND_H1 =>
