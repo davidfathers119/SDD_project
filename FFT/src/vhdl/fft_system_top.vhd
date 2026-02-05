@@ -68,6 +68,9 @@ architecture rtl of fft_system_top is
     signal out_idx : integer range 0 to FFT_N := 0;
     signal out_byte_sel : integer range 0 to 3 := 0;
     signal tx_busy : std_logic := '0';
+    
+    -- 启动保护：只有接收到完整封包后才允许发送
+    signal rx_packet_received : std_logic := '0';
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -169,6 +172,7 @@ begin
             out_idx <= 0;
             out_byte_sel <= 0;
             tx_busy <= '0';
+            rx_packet_received <= '0';  -- 启动时未接收封包
         elsif rising_edge(clk25) then
             -- defaults
             fft_start <= '0';
@@ -223,6 +227,7 @@ begin
                                 out_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
 
                                 if sample_idx = FFT_N-1 then
+                                    rx_packet_received <= '1';  -- 标记已接收完整封包
                                     ps <= SEND_H1;
                                 else
                                     sample_idx <= sample_idx + 1;
@@ -237,16 +242,20 @@ begin
                     end if;
 
                 when SEND_H1 =>
-                    tx_b <= TX_HEADER_H1;
-                    if tx_busy = '0' then
-                        if tx_rdy = '1' then
-                            tx_v <= '1';
-                            tx_busy <= '1';
+                    tx_rx_packet_received = '1' then  -- 只有接收过封包才发送
+                        if tx_busy = '0' then
+                            if tx_rdy = '1' then
+                                tx_v <= '1';
+                                tx_busy <= '1';
+                            end if;
+                        else
+                            if tx_rdy = '0' then
+                                tx_busy <= '0';
+                                ps <= SEND_H2;
+                            end if;
                         end if;
                     else
-                        if tx_rdy = '0' then
-                            tx_busy <= '0';
-                            ps <= SEND_H2;
+                        ps <= WAIT_H1;  -- 未接收封包，返回等待<= SEND_H2;
                         end if;
                     end if;
 

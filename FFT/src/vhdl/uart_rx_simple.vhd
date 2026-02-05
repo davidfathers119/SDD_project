@@ -24,10 +24,10 @@ entity uart_rx_simple is
 end uart_rx_simple;
 
 architecture rtl of uart_rx_simple is
-    -- 波特率分频器: 25MHz / 38400 = 651
-    -- 为了在start bit中间采样，使用16x过采样
+    -- 波特率分频器: 25MHz / (38400 * 16) = 40.69 ≈ 40
+    -- 实际过采样频率: 25MHz / 40 = 625kHz = 38400 * 16.28 (16x过采样)
     constant OVERSAMPLE : integer := 16;
-    constant BAUD_DIV : integer := CLK_FREQ / (BAUD_RATE * OVERSAMPLE);
+    constant BAUD_DIV : integer := 40;
     
     type state_t is (IDLE, START, DATA, STOP);
     signal state : state_t := IDLE;

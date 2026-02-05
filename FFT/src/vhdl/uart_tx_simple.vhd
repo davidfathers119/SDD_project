@@ -25,8 +25,9 @@ entity uart_tx_simple is
 end uart_tx_simple;
 
 architecture rtl of uart_tx_simple is
-    -- 波特率分频器: 25MHz / 38400 = 651
-    constant BAUD_DIV : integer := CLK_FREQ / BAUD_RATE;
+    -- 波特率分频器: 25MHz / 38400 = 651.04 ≈ 651 (误差0.06%)
+    -- 实际波特率: 25MHz / 651 = 38402.46 (误差+0.06%，可接受)
+    constant BAUD_DIV : integer := 651;
     
     type state_t is (IDLE, START, DATA, STOP);
     signal state : state_t := IDLE;
