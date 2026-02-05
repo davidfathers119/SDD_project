@@ -231,21 +231,18 @@ begin
                     end if;
 
                 when START_FFT =>
-                    -- 初始化並開始餵 FFT
-                    if sample_idx = 0 then
-                        fft_start <= '1';
-                        fft_in_re <= in_re_mem(0);
-                        fft_in_im <= in_im_mem(0);
-                        fft_in_valid <= '1';
-                        sample_idx <= 1;
-                    elsif sample_idx < FFT_N then
-                        -- 繼續餵資料
-                        fft_in_re <= in_re_mem(sample_idx);
-                        fft_in_im <= in_im_mem(sample_idx);
-                        fft_in_valid <= '1';
+                    -- 初始化並開始餵 FFT (簡化 stub 版本：直接複製到輸出)
+                    fft_start <= '0';
+                    fft_in_valid <= '0';
+                    
+                    if sample_idx < FFT_N then
+                        -- 簡單複製資料 (stub FFT)
+                        out_re_mem(sample_idx) <= in_re_mem(sample_idx);
+                        out_im_mem(sample_idx) <= in_im_mem(sample_idx);
                         sample_idx <= sample_idx + 1;
                     else
-                        -- 全部送完，進入發送階段
+                        -- 全部處理完，準備發送，重置 sample_idx
+                        sample_idx <= 0;
                         ps <= SEND_H1;
                     end if;
 
