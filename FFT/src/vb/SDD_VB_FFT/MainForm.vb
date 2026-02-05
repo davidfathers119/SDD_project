@@ -201,10 +201,23 @@ Public Class MainForm
         Try
             Dim portName As String = _cmbPorts.SelectedItem.ToString()
             _port.Open(portName, 38400)
+            
+            ' 串口打開後，等待 FPGA 穩定並清理任何殘留資料
+            SetStatus($"已連線 {portName}，等待 FPGA 穩定...")
+            Await Task.Delay(2000)  ' 等待 2 秒讓 FPGA 完全初始化
+            
+            ' 清空可能存在的垃圾資料
+            Dim junkBytes As Integer = _port.BytesToRead
+            If junkBytes > 0 Then
+                Dim junk(junkBytes - 1) As Byte
+                _port.Read(junk, 0, junkBytes)
+                Log($"[Init] 丟棄 {junkBytes} bytes 殘留資料")
+            End If
+            
             _connected = True
             _btnConnect.Text = "Disconnect"
             _btnSend.Enabled = True
-            SetStatus($"Connected: {portName} @38400")
+            SetStatus($"Connected: {portName} @38400 (已初始化)")
         Catch ex As Exception
             SetStatus($"Connect failed: {ex.Message}")
         End Try

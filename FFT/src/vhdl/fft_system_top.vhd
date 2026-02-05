@@ -187,13 +187,7 @@ begin
             -- defaults
             fft_start <= '0';
             fft_in_valid <= '0';
-            -- 只有系統準備好才允許發送
-            if system_ready = '1' then
-                tx_v <= '0';
-            else
-                tx_v <= '0';
-                tx_b <= (others => '0');
-            end if;
+            tx_v <= '0';  -- 預設不發送，由 FSM 各狀態控制
 
             case ps is
                 when WAIT_H1 =>
