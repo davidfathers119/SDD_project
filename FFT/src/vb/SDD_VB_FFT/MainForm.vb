@@ -273,10 +273,12 @@ Public Class MainForm
                 Log("[Cleanup] 清除緩衝區並重置 Parser，依賴 Parser 自動同步")
                 
                 Dim sendTime As String = DateTime.Now.ToString("HH:mm:ss.fff")
-                Dim previewLen As Integer = Math.Min(8, packet.Length)
+                Dim previewLen As Integer = Math.Min(16, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
-                Log($"[TX] {sendTime} bytes={packet.Length} head={preview}")
+                Log($"[TX] {sendTime} 發送 {packet.Length} bytes")
+                Log($"[TX] Header: {preview}")
+                Log($"[TX] 完整封包前32bytes: {BitConverter.ToString(packet, 0, Math.Min(32, packet.Length))}")
                 Log($"[Info] Parser 將自動忽略垃圾數據，只響應正確的 header 0x55AA")
 
                 Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=15000, ct:=cts.Token)
@@ -296,6 +298,24 @@ Public Class MainForm
                     allData = _rxAllBytes.ToArray()
                 End SyncLock
                 If allData.Length > 0 Then
+                    ' 統計字節出現頻率（診斷用）
+                    Dim freq As New Dictionary(Of Byte, Integer)()
+                    For Each b As Byte In allData
+                        If freq.ContainsKey(b) Then
+                            freq(b) += 1
+                        Else
+                            freq(b) = 1
+                        End If
+                    Next
+                    Dim has55 As Boolean = freq.ContainsKey(&H55)
+                    Dim hasAA As Boolean = freq.ContainsKey(&HAA)
+                    Log($"[Analysis] 收到 {allData.Length} bytes 垃圾數據, 含 0x55={has55}, 含 0xAA={hasAA}")
+                    
+                    ' 顯示最常見的字節
+                    Dim topBytes = freq.OrderByDescending(Function(kv) kv.Value).Take(5)
+                    Dim topStr As String = String.Join(", ", topBytes.Select(Function(kv) $"0x{kv.Key:X2}({kv.Value}次)"))
+                    Log($"[Analysis] 最常見字節: {topStr}")
+                    
                     Dim dumpStr As String = BitConverter.ToString(allData)
                     Log($"[RX Dump] Total {allData.Length} bytes:")
                     ' 分段顯示，每行32個byte
@@ -306,7 +326,7 @@ Public Class MainForm
                     Next
                 End If
                 SetStatus($"Timeout: {ex.Message}")
-                Log($"[Error] {ex.Message}")
+                Log($"[Error] 等待 FPGA 回包逾時，但只收到垃圾數據（無有效 header）")
             Catch ex As Exception
                 SetStatus($"Error: {ex.Message}")
                 Log($"[Error] {ex}")
