@@ -143,7 +143,7 @@ begin
         );
 
     -- LED: 簡易狀態 + FSM 除錯
-    led_status(0) <= rx_v;                    -- RX 收到資料
+    led_status(0) <= system_ready;            -- 系統準備好（40ms 延遲後）
     led_status(1) <= tx_rdy;                  -- TX 準備
     led_status(2) <= '1' when sample_idx > 200 else '0';  -- 接收進度：sample_idx > 200
     led_status(3) <= data_ready;              -- 資料準備好
