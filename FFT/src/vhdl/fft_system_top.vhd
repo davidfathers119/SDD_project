@@ -256,8 +256,7 @@ begin
                             end if;
                         end if;
                     else
-                        ps <= WAIT_H1;  -- 未接收封包，返回等待<= SEND_H2;
-                        end if;
+                        ps <= WAIT_H1;  -- 未接收封包，返回等待
                     end if;
 
                 when SEND_H2 =>
