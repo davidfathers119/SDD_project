@@ -19,11 +19,8 @@ entity fft_system_top is
 end fft_system_top;
 
 architecture rtl of fft_system_top is
-    -- Quartus 13.1 對「generic 用在 array/range bounds」偶爾會在 elaborate/map 階段崩潰。
-    -- 這個專案目前目標固定 256-point / 16-bit，因此內部統一用常數做 bounds，提升相容性。
     constant FFT_N      : integer := 256;
     constant DATA_W     : integer := 16;
-    -- 50MHz -> 25MHz (driver 內部 divisor 表以 25MHz 設計)
     signal clk25 : std_logic := '0';
 
     -- UART link
@@ -32,18 +29,12 @@ architecture rtl of fft_system_top is
     signal tx_b    : std_logic_vector(7 downto 0) := (others => '0');
     signal tx_v    : std_logic := '0';
     signal tx_rdy  : std_logic;
-    
-    -- UART 實際連接信號（加入 system_ready 控制）
-    signal uart_tx_b : std_logic_vector(7 downto 0) := (others => '0');
-    signal uart_tx_v : std_logic := '0';
-    signal uart_rst_n : std_logic;  -- 受控的 UART reset
 
     -- packet parser
     type pstate_t is (
         WAIT_H1, WAIT_H2,
         WAIT_LEN0, WAIT_LEN1,
         RECV_PAYLOAD,
-        START_FFT,
         SEND_H1, SEND_H2,
         SEND_LEN0, SEND_LEN1,
         SEND_PAYLOAD
@@ -56,12 +47,12 @@ architecture rtl of fft_system_top is
     constant TX_HEADER_H2 : std_logic_vector(7 downto 0) := x"AA";
 
     signal len0, len1 : std_logic_vector(7 downto 0) := (others => '0');
-    signal sample_idx : integer range 0 to FFT_N := 0;  -- 擴展到 FFT_N 避免 START_FFT 溢出
+    signal sample_idx : integer range 0 to FFT_N := 0;
     signal byte_in_sample : integer range 0 to 3 := 0;
 
     type mem_t is array (0 to FFT_N-1) of signed(DATA_W-1 downto 0);
     signal in_re_mem, in_im_mem : mem_t;
-    signal out_re_mem, out_im_mem : mem_t;  -- 輸出緩衝區
+    signal out_re_mem, out_im_mem : mem_t;
 
     signal re_lo, re_hi, im_lo, im_hi : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -69,26 +60,14 @@ architecture rtl of fft_system_top is
     signal fft_start : std_logic := '0';
     signal fft_in_re, fft_in_im : signed(DATA_W-1 downto 0) := (others => '0');
     signal fft_in_valid : std_logic := '0';
-
     signal fft_out_re, fft_out_im : signed(DATA_W-1 downto 0);
     signal fft_out_valid : std_logic;
     signal fft_busy, fft_done : std_logic;
 
     -- send side
-    signal out_idx : integer range 0 to FFT_N := 0;  -- 擴展範圍避免邊界檢查時溢出
+    signal out_idx : integer range 0 to FFT_N := 0;
     signal out_byte_sel : integer range 0 to 3 := 0;
-    signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
-    signal tx_busy : std_logic := '0';  -- 標記當前byte正在發送
-    signal tx_enabled : std_logic := '0';  -- 標記是否允許發送（只在SEND狀態為'1'）
-    signal tx_enabled_reg : std_logic := '0';  -- tx_enabled的寄存器版本（延遲一週期）
-    
-    -- 啟動延遲：防止 power-on 時信號不穩定
-    signal startup_counter : integer range 0 to 15000000 := 0;  -- 擴展範圍支援更長延遲
-    signal system_ready : std_logic := '0';
-    
-    -- LED latch：延長顯示時間
-    signal led_send_header_latch : std_logic := '0';
-    signal led_send_payload_latch : std_logic := '0';
+    signal tx_busy : std_logic := '0';
 
     constant FFT_SIZE_U16 : unsigned(15 downto 0) := to_unsigned(FFT_N, 16);
 
@@ -97,7 +76,7 @@ architecture rtl of fft_system_top is
     function to_s16(lo_b, hi_b : std_logic_vector(7 downto 0)) return s16_t is
         variable tmp : std_logic_vector(15 downto 0);
     begin
-        tmp := hi_b & lo_b; -- little-endian: lo first, then hi
+        tmp := hi_b & lo_b;
         return signed(tmp);
     end function;
 
@@ -115,13 +94,13 @@ begin
     u_link: entity work.rs232_link
         port map(
             clk      => clk25,
-            rst_n    => uart_rst_n,  -- 使用受控的 reset
+            rst_n    => rst_n,
             rx       => uart_rx,
             tx       => uart_tx,
             rx_data  => rx_b,
             rx_valid => rx_v,
-            tx_data  => uart_tx_b,
-            tx_valid => uart_tx_v,
+            tx_data  => tx_b,
+            tx_valid => tx_v,
             tx_ready => tx_rdy
         );
     
@@ -144,38 +123,17 @@ begin
             done      => fft_done
         );
 
-    -- LED: 簡易狀態 + FSM 除錯
-    led_status(0) <= system_ready;            -- 系統準備好（40ms 延遲後）
-    led_status(1) <= tx_rdy;                  -- TX 準備好（關鍵！）
-    led_status(2) <= '1' when sample_idx = FFT_N-1 else '0';  -- sample_idx = 255（最後一個樣本）
-    led_status(3) <= '1' when ps = SEND_H1 else '0';  -- 在 SEND_H1 狀態
-    -- 新增：FSM 狀態除錯
-    led_status(4) <= '1' when ps = WAIT_H1 else '0';  -- 在 WAIT_H1 狀態
-    led_status(5) <= led_send_header_latch;   -- 曾經發送 header（latch）
-    led_status(6) <= led_send_payload_latch;  -- 曾經發送 payload（latch）
-    led_status(7) <= '1' when ps = RECV_PAYLOAD else '0'; -- 是否在接收 payload
+    -- LED: 簡易狀態指示
+    led_status(0) <= '1' when ps = WAIT_H1 else '0';
+    led_status(1) <= '1' when ps = RECV_PAYLOAD else '0';
+    led_status(2) <= '1' when ps = SEND_H1 or ps = SEND_H2 else '0';
+    led_status(3) <= '1' when ps = SEND_PAYLOAD else '0';
+    led_status(4) <= tx_rdy;
+    led_status(5) <= tx_v;
+    led_status(6) <= '1' when sample_idx = FFT_N-1 else '0';
+    led_status(7) <= '1' when out_idx = FFT_N-1 else '0';
 
-    -- packet FSM + FFT feed + TX
-    -- 啟動延遲計數器
-    process(clk25, rst_n)
-    begin
-        if rst_n = '0' then
-            startup_counter <= 0;
-            system_ready <= '0';
-            uart_rst_n <= '0';  -- 同步生成 UART reset
-        elsif rising_edge(clk25) then
-            if startup_counter < 12500000 then  -- 500ms @ 25MHz (930 bytes @ 38400 需 242ms，留雙倍餘裕)
-                startup_counter <= startup_counter + 1;
-                system_ready <= '0';
-                uart_rst_n <= '0';  -- 保持 UART reset
-            else
-                system_ready <= '1';
-                uart_rst_n <= '1';  -- 釋放 UART reset
-            end if;
-        end if;
-    end process;
-    
-    -- 主 FSM
+    -- 主FSM
     process(clk25, rst_n)
         variable length_val : integer;
     begin
@@ -185,42 +143,30 @@ begin
             len1 <= (others => '0');
             sample_idx <= 0;
             byte_in_sample <= 0;
-
             re_lo <= (others => '0');
             re_hi <= (others => '0');
             im_lo <= (others => '0');
             im_hi <= (others => '0');
-
             fft_start <= '0';
             fft_in_valid <= '0';
             tx_v <= '0';
             tx_b <= (others => '0');
             out_idx <= 0;
             out_byte_sel <= 0;
-            data_ready <= '0';  -- reset 時標記資料未準備好
-            tx_busy <= '0';  -- reset 時清除發送忙碌標誌
-            tx_enabled <= '0';  -- reset 時禁止發送
-            tx_enabled_reg <= '0';  -- reset 延遲信號
-            led_send_header_latch <= '0';
-            led_send_payload_latch <= '0';
+            tx_busy <= '0';
         elsif rising_edge(clk25) then
-            -- defaults (預設所有控制信號)
+            -- defaults
             fft_start <= '0';
             fft_in_valid <= '0';
             tx_v <= '0';
-            tx_enabled <= '0';
 
             case ps is
                 when WAIT_H1 =>
-                    tx_b <= (others => '0');
-                    if system_ready = '1' and rx_v = '1' then
-                        if rx_b = RX_HEADER_H1 then
-                            ps <= WAIT_H2;
-                        end if;
+                    if rx_v = '1' and rx_b = RX_HEADER_H1 then
+                        ps <= WAIT_H2;
                     end if;
 
                 when WAIT_H2 =>
-                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         if rx_b = RX_HEADER_H2 then
                             ps <= WAIT_LEN0;
@@ -230,21 +176,18 @@ begin
                     end if;
 
                 when WAIT_LEN0 =>
-                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         len0 <= rx_b;
                         ps <= WAIT_LEN1;
                     end if;
 
                 when WAIT_LEN1 =>
-                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         len1 <= rx_b;
-                        sample_idx <= 0;
-                        byte_in_sample <= 0;
-
                         length_val := to_integer(unsigned(rx_b & len0));
                         if length_val = FFT_N then
+                            sample_idx <= 0;
+                            byte_in_sample <= 0;
                             ps <= RECV_PAYLOAD;
                         else
                             ps <= WAIT_H1;
@@ -252,7 +195,6 @@ begin
                     end if;
 
                 when RECV_PAYLOAD =>
-                    tx_b <= (others => '0');
                     if rx_v = '1' then
                         case byte_in_sample is
                             when 0 => re_lo <= rx_b;
@@ -266,8 +208,6 @@ begin
                                 out_im_mem(sample_idx) <= to_s16(im_lo, rx_b);
 
                                 if sample_idx = FFT_N-1 then
-                                    sample_idx <= 0;
-                                    data_ready <= '1';
                                     ps <= SEND_H1;
                                 else
                                     sample_idx <= sample_idx + 1;
@@ -281,17 +221,10 @@ begin
                         end if;
                     end if;
 
-                when START_FFT =>
-                    tx_b <= (others => '0');
-                    data_ready <= '1';
-                    ps <= SEND_H1;
-
                 when SEND_H1 =>
-                    tx_enabled <= '1';
-                    led_send_header_latch <= '1';
                     tx_b <= TX_HEADER_H1;
                     if tx_busy = '0' then
-                        if tx_rdy = '1' and data_ready = '1' then
+                        if tx_rdy = '1' then
                             tx_v <= '1';
                             tx_busy <= '1';
                         end if;
@@ -303,7 +236,6 @@ begin
                     end if;
 
                 when SEND_H2 =>
-                    tx_enabled <= '1';
                     tx_b <= TX_HEADER_H2;
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -318,7 +250,6 @@ begin
                     end if;
 
                 when SEND_LEN0 =>
-                    tx_enabled <= '1';
                     tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -333,7 +264,6 @@ begin
                     end if;
 
                 when SEND_LEN1 =>
-                    tx_enabled <= '1';
                     tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                     if tx_busy = '0' then
                         if tx_rdy = '1' then
@@ -350,8 +280,6 @@ begin
                     end if;
 
                 when SEND_PAYLOAD =>
-                    tx_enabled <= '1';
-                    led_send_payload_latch <= '1';
                     case out_byte_sel is
                         when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
                         when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
@@ -370,9 +298,6 @@ begin
                             if out_byte_sel = 3 then
                                 out_byte_sel <= 0;
                                 if out_idx = FFT_N-1 then
-                                    data_ready <= '0';
-                                    led_send_header_latch <= '0';
-                                    led_send_payload_latch <= '0';
                                     ps <= WAIT_H1;
                                 else
                                     out_idx <= out_idx + 1;
@@ -383,28 +308,6 @@ begin
                         end if;
                     end if;
             end case;
-            
-            -- 在case之後更新延遲寄存器（確保讀取到case設置的值）
-            tx_enabled_reg <= tx_enabled;
-
-        end if;
-    end process;
-    
-    -- 獨立的UART TX控制process（完全隔離）
-    process(clk25, rst_n)
-    begin
-        if rst_n = '0' then
-            uart_tx_b <= (others => '0');
-            uart_tx_v <= '0';
-        elsif rising_edge(clk25) then
-            -- 只在系統準備且發送啟用時轉發
-            if system_ready = '1' and tx_enabled_reg = '1' then
-                uart_tx_b <= tx_b;
-                uart_tx_v <= tx_v;
-            else
-                uart_tx_b <= (others => '0');
-                uart_tx_v <= '0';
-            end if;
         end if;
     end process;
 
