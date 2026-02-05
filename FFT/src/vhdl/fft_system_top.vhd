@@ -36,6 +36,7 @@ architecture rtl of fft_system_top is
     -- UART 實際連接信號（加入 system_ready 控制）
     signal uart_tx_b : std_logic_vector(7 downto 0);
     signal uart_tx_v : std_logic;
+    signal uart_rst_n : std_logic;  -- 受控的 UART reset
 
     -- packet parser
     type pstate_t is (
@@ -107,7 +108,7 @@ begin
     u_link: entity work.rs232_link
         port map(
             clk      => clk25,
-            rst_n    => rst_n,
+            rst_n    => uart_rst_n,  -- 使用受控的 reset
             rx       => uart_rx,
             tx       => uart_tx,
             rx_data  => rx_b,
@@ -117,7 +118,8 @@ begin
             tx_ready => tx_rdy
         );
     
-    -- 只有系統準備好才允許發送到 UART
+    -- 只有系統準備好才釋放 UART reset 並允許發送
+    uart_rst_n <= rst_n and system_ready;  -- system_ready='0' 時強制 UART reset
     uart_tx_b <= tx_b when system_ready = '1' else (others => '0');
     uart_tx_v <= tx_v when system_ready = '1' else '0';
 
