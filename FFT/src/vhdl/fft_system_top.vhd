@@ -54,8 +54,8 @@ architecture rtl of fft_system_top is
     signal byte_in_sample : integer range 0 to 3 := 0;
 
     type mem_t is array (0 to FFT_N-1) of signed(DATA_W-1 downto 0);
-    signal in_re_mem, in_im_mem : mem_t;
-    signal out_re_mem, out_im_mem : mem_t;
+    signal in_re_mem, in_im_mem : mem_t := (others => (others => '0'));
+    signal out_re_mem, out_im_mem : mem_t := (others => (others => '0'));
 
     signal re_lo, re_hi, im_lo, im_hi : std_logic_vector(7 downto 0) := (others => '0');
 
@@ -165,6 +165,7 @@ begin
     tx_v_gated <= tx_v when system_stable = '1' else '0';
     
     -- UART TX reset gating: 系统未稳定时保持UART TX在reset状态(TX线=idle高电平)
+    -- 注意：uart_tx_rst_n应该是低有效reset，系统不稳定时保持低电平(reset状态)
     uart_tx_rst_n <= rst_n and system_stable;
 
     -- Power-on启动延迟
@@ -274,9 +275,14 @@ begin
                     end if;
 
                 when SEND_H1 =>
-                    tx_b <= TX_HEADER_H1;
-                    -- 双重保护：系统必须稳定 且 已接收封包
-                    if system_stable = '1' and rx_packet_received = '1' then
+                    -- 防禦性檢查：如果沒有接收封包，立即返回等待狀態
+                    if rx_packet_received = '0' or system_stable = '0' then
+                        ps <= WAIT_H1;
+                        tx_v <= '0';
+                        tx_b <= (others => '0');
+                        tx_busy <= '0';
+                    else
+                        tx_b <= TX_HEADER_H1;
                         if tx_busy = '0' then
                             if tx_rdy = '1' then
                                 tx_v <= '1';
@@ -288,79 +294,112 @@ begin
                                 ps <= SEND_H2;
                             end if;
                         end if;
-                    else
-                        ps <= WAIT_H1;  -- 未接收封包，返回等待
                     end if;
 
                 when SEND_H2 =>
-                    tx_b <= TX_HEADER_H2;
-                    if tx_busy = '0' then
-                        if tx_rdy = '1' then
-                            tx_v <= '1';
-                            tx_busy <= '1';
-                        end if;
+                    -- 防禦性檢查
+                    if rx_packet_received = '0' or system_stable = '0' then
+                        ps <= WAIT_H1;
+                        tx_v <= '0';
+                        tx_b <= (others => '0');
+                        tx_busy <= '0';
                     else
-                        if tx_rdy = '0' then
-                            tx_busy <= '0';
-                            ps <= SEND_LEN0;
+                        tx_b <= TX_HEADER_H2;
+                        if tx_busy = '0' then
+                            if tx_rdy = '1' then
+                                tx_v <= '1';
+                                tx_busy <= '1';
+                            end if;
+                        else
+                            if tx_rdy = '0' then
+                                tx_busy <= '0';
+                                ps <= SEND_LEN0;
+                            end if;
                         end if;
                     end if;
 
                 when SEND_LEN0 =>
-                    tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
-                    if tx_busy = '0' then
-                        if tx_rdy = '1' then
-                            tx_v <= '1';
-                            tx_busy <= '1';
-                        end if;
+                    -- 防禦性檢查
+                    if rx_packet_received = '0' or system_stable = '0' then
+                        ps <= WAIT_H1;
+                        tx_v <= '0';
+                        tx_b <= (others => '0');
+                        tx_busy <= '0';
                     else
-                        if tx_rdy = '0' then
-                            tx_busy <= '0';
-                            ps <= SEND_LEN1;
+                        tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
+                        if tx_busy = '0' then
+                            if tx_rdy = '1' then
+                                tx_v <= '1';
+                                tx_busy <= '1';
+                            end if;
+                        else
+                            if tx_rdy = '0' then
+                                tx_busy <= '0';
+                                ps <= SEND_LEN1;
+                            end if;
                         end if;
                     end if;
 
                 when SEND_LEN1 =>
-                    tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
-                    if tx_busy = '0' then
-                        if tx_rdy = '1' then
-                            tx_v <= '1';
-                            tx_busy <= '1';
-                        end if;
+                    -- 防禦性檢查
+                    if rx_packet_received = '0' or system_stable = '0' then
+                        ps <= WAIT_H1;
+                        tx_v <= '0';
+                        tx_b <= (others => '0');
+                        tx_busy <= '0';
                     else
-                        if tx_rdy = '0' then
-                            tx_busy <= '0';
-                            out_idx <= 0;
-                            out_byte_sel <= 0;
-                            ps <= SEND_PAYLOAD;
+                        tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
+                        if tx_busy = '0' then
+                            if tx_rdy = '1' then
+                                tx_v <= '1';
+                                tx_busy <= '1';
+                            end if;
+                        else
+                            if tx_rdy = '0' then
+                                tx_busy <= '0';
+                                out_idx <= 0;
+                                out_byte_sel <= 0;
+                                ps <= SEND_PAYLOAD;
+                            end if;
                         end if;
                     end if;
 
                 when SEND_PAYLOAD =>
-                    case out_byte_sel is
-                        when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
-                        when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
-                        when 2 => tx_b <= std_logic_vector(out_im_mem(out_idx)(7 downto 0));
-                        when others => tx_b <= std_logic_vector(out_im_mem(out_idx)(15 downto 8));
-                    end case;
-                    
-                    if tx_busy = '0' then
-                        if tx_rdy = '1' then
-                            tx_v <= '1';
-                            tx_busy <= '1';
-                        end if;
+                    -- 防禦性檢查
+                    if rx_packet_received = '0' or system_stable = '0' then
+                        ps <= WAIT_H1;
+                        tx_v <= '0';
+                        tx_b <= (others => '0');
+                        tx_busy <= '0';
+                        out_idx <= 0;
+                        out_byte_sel <= 0;
                     else
-                        if tx_rdy = '0' then
-                            tx_busy <= '0';
-                            if out_byte_sel = 3 then
-                                out_byte_sel <= 0;
-                                if out_idx = FFT_N-1 then
-                                    ps <= WAIT_H1;
+                        case out_byte_sel is
+                            when 0 => tx_b <= std_logic_vector(out_re_mem(out_idx)(7 downto 0));
+                            when 1 => tx_b <= std_logic_vector(out_re_mem(out_idx)(15 downto 8));
+                            when 2 => tx_b <= std_logic_vector(out_im_mem(out_idx)(7 downto 0));
+                            when others => tx_b <= std_logic_vector(out_im_mem(out_idx)(15 downto 8));
+                        end case;
+                        
+                        if tx_busy = '0' then
+                            if tx_rdy = '1' then
+                                tx_v <= '1';
+                                tx_busy <= '1';
+                            end if;
+                        else
+                            if tx_rdy = '0' then
+                                tx_busy <= '0';
+                                if out_byte_sel = 3 then
+                                    out_byte_sel <= 0;
+                                    if out_idx = FFT_N-1 then
+                                        rx_packet_received <= '0';  -- 發送完成，重置標誌
+                                        ps <= WAIT_H1;
+                                    else
+                                        out_idx <= out_idx + 1;
+                                    end if;
                                 else
-                                    out_idx <= out_idx + 1;
+                                    out_byte_sel <= out_byte_sel + 1;
                                 end if;
-                            else
-                                out_byte_sel <= out_byte_sel + 1;
                             end if;
                         end if;
                     end if;
