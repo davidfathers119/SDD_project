@@ -47,21 +47,23 @@ Namespace Modules
                         _h1 = b
                         _state = State.WaitH2
                         RaiseEvent DebugTrace($"[Parser] Found H1=0x{b:X2}, waiting H2")
+                    Else
+                        ' 忽略所有非header起始的垃圾字節（不記錄以避免日誌洪水）
                     End If
 
                 Case State.WaitH2
                     _h2 = b
                     If (_h1 = &HAA AndAlso _h2 = &H55) OrElse (_h1 = &H55 AndAlso _h2 = &HAA) Then
                         _state = State.WaitLen0
-                        RaiseEvent DebugTrace($"[Parser] Header matched: 0x{_h1:X2}{_h2:X2}, waiting length")
+                        RaiseEvent DebugTrace($"[Parser] ✓ Header matched: 0x{_h1:X2}{_h2:X2}, waiting length")
                     Else
-                        ' Header不匹配，如果當前byte可能是新的H1，就用它重試
+                        ' Header不匹配，記錄並重新同步
+                        RaiseEvent DebugTrace($"[Parser] ✗ Invalid header: 0x{_h1:X2}{_h2:X2}, re-sync")
+                        ' 如果當前byte可能是新的H1，就用它重試
                         If b = &HAA OrElse b = &H55 Then
                             _h1 = b
                             _state = State.WaitH2
-                            RaiseEvent DebugTrace($"[Parser] Header mismatch: 0x{_h1:X2}{_h2:X2}, but reuse 0x{b:X2} as new H1")
                         Else
-                            RaiseEvent DebugTrace($"[Parser] Header mismatch: 0x{_h1:X2}{_h2:X2}, reset")
                             _state = State.WaitH1
                         End If
                     End If

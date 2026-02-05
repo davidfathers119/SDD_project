@@ -267,49 +267,17 @@ Public Class MainForm
                     _rxAllBytes.Clear()
                 End SyncLock
                 
-                ' 積極清理策略：重複清理直到穩定
-                Log("[Cleanup] 開始清理 FPGA 緩衝區...")
-                Dim cleanupRounds As Integer = 0
-                Dim maxRounds As Integer = 10
-                
-                While cleanupRounds < maxRounds
-                    _port.ClearBuffers()
-                    Await Task.Delay(500)  ' 等待 500ms
-                    
-                    ' 檢查是否有新資料
-                    Dim bytesRead As Integer = _port.BytesToRead
-                    If bytesRead > 0 Then
-                        Dim garbage(bytesRead - 1) As Byte
-                        Dim actualRead As Integer = _port.Read(garbage, 0, bytesRead)
-                        Dim hexDump As String = BitConverter.ToString(garbage, 0, Math.Min(32, actualRead))
-                        Log($"[Cleanup] Round {cleanupRounds + 1}: 丟棄 {actualRead} bytes, hex={hexDump}")
-                        cleanupRounds += 1
-                    Else
-                        ' 連續兩輪都沒有資料，認為已經清理乾淨
-                        If cleanupRounds > 0 Then
-                            Exit While
-                        End If
-                        cleanupRounds += 1
-                    End If
-                End While
-                
-                ' 最後清理通過事件接收的資料
-                SyncLock _rxAllBytes
-                    If _rxAllBytes.Count > 0 Then
-                        Log($"[Cleanup] 清除事件緩衝區 {_rxAllBytes.Count} bytes")
-                        _rxAllBytes.Clear()
-                    End If
-                End SyncLock
-                _rxChunkCount = 0
-                Interlocked.Exchange(_rxBytesTotal, 0)
-                
-                Log("[Cleanup] 清理完成，開始發送封包")
+                ' 簡化清理：只清一次緩衝區，讓 Parser 自動同步到正確的 header
+                _port.ClearBuffers()
+                _parser.Reset()  ' 重置 parser 狀態
+                Log("[Cleanup] 清除緩衝區並重置 Parser，依賴 Parser 自動同步")
                 
                 Dim sendTime As String = DateTime.Now.ToString("HH:mm:ss.fff")
                 Dim previewLen As Integer = Math.Min(8, packet.Length)
                 Dim preview As String = BitConverter.ToString(packet, 0, previewLen)
                 SetStatus($"Sending... TX[{previewLen}]={preview} waiting response")
                 Log($"[TX] {sendTime} bytes={packet.Length} head={preview}")
+                Log($"[Info] Parser 將自動忽略垃圾數據，只響應正確的 header 0x55AA")
 
                 Dim response = Await _service.SendAndReceiveAsync(packet, timeoutMs:=15000, ct:=cts.Token)
                 Dim outRe = response.Item1
