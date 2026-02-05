@@ -26,6 +26,7 @@ architecture rtl of fft_system_top is
     -- UART link
     signal rx_b    : std_logic_vector(7 downto 0);
     signal rx_v    : std_logic;
+    signal rx_v_gated : std_logic;  -- 受system_stable控制的rx_valid
     signal tx_b    : std_logic_vector(7 downto 0) := (others => '0');
     signal tx_v    : std_logic := '0';
     signal tx_rdy  : std_logic;
@@ -155,6 +156,9 @@ begin
     led_status(6) <= '1' when sample_idx = FFT_N-1 else '0';
     led_status(7) <= '1' when out_idx = FFT_N-1 else '0';
 
+    -- RX valid gating: 只有系统稳定后才接受RX数据
+    rx_v_gated <= rx_v when system_stable = '1' else '0';
+
     -- Power-on启动延迟
     process(clk25, rst_n)
     begin
@@ -201,12 +205,12 @@ begin
 
             case ps is
                 when WAIT_H1 =>
-                    if system_stable = '1' and rx_v = '1' and rx_b = RX_HEADER_H1 then
+                    if rx_v_gated = '1' and rx_b = RX_HEADER_H1 then
                         ps <= WAIT_H2;
                     end if;
 
                 when WAIT_H2 =>
-                    if rx_v = '1' then
+                    if rx_v_gated = '1' then
                         if rx_b = RX_HEADER_H2 then
                             ps <= WAIT_LEN0;
                         else
@@ -215,13 +219,13 @@ begin
                     end if;
 
                 when WAIT_LEN0 =>
-                    if rx_v = '1' then
+                    if rx_v_gated = '1' then
                         len0 <= rx_b;
                         ps <= WAIT_LEN1;
                     end if;
 
                 when WAIT_LEN1 =>
-                    if rx_v = '1' then
+                    if rx_v_gated = '1' then
                         len1 <= rx_b;
                         length_val := to_integer(unsigned(rx_b & len0));
                         if length_val = FFT_N then
@@ -234,7 +238,7 @@ begin
                     end if;
 
                 when RECV_PAYLOAD =>
-                    if rx_v = '1' then
+                    if rx_v_gated = '1' then
                         case byte_in_sample is
                             when 0 => re_lo <= rx_b;
                             when 1 => re_hi <= rx_b;
