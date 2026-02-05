@@ -79,6 +79,7 @@ architecture rtl of fft_system_top is
     signal out_byte_sel : integer range 0 to 3 := 0;
     signal data_ready : std_logic := '0';  -- 標記輸出資料是否已準備好
     signal tx_busy : std_logic := '0';  -- 標記當前byte正在發送
+    signal tx_enabled : std_logic := '0';  -- 標記是否允許發送（只在SEND狀態為'1'）
     
     -- 啟動延遲：防止 power-on 時信號不穩定
     signal startup_counter : integer range 0 to 15000000 := 0;  -- 擴展範圍支援更長延遲
@@ -123,9 +124,9 @@ begin
             tx_ready => tx_rdy
         );
     
-    -- 只有系統準備好才允許發送（uart_rst_n 在 process 中同步生成）
-    uart_tx_b <= tx_b when system_ready = '1' else (others => '0');
-    uart_tx_v <= tx_v when system_ready = '1' else '0';
+    -- 只有系統準備好且明確在發送狀態才允許發送
+    uart_tx_b <= tx_b when (system_ready = '1' and tx_enabled = '1') else (others => '0');
+    uart_tx_v <= tx_v when (system_ready = '1' and tx_enabled = '1') else '0';
 
     u_fft: entity work.fft_core_stub
         generic map(
@@ -201,6 +202,7 @@ begin
             out_byte_sel <= 0;
             data_ready <= '0';  -- reset 時標記資料未準備好
             tx_busy <= '0';  -- reset 時清除發送忙碌標誌
+            tx_enabled <= '0';  -- reset 時禁止發送
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
@@ -211,6 +213,7 @@ begin
 
             case ps is
                 when WAIT_H1 =>
+                    tx_enabled <= '0';  -- 禁止發送
                     -- 只有系統準備好才開始接收
                     if system_ready = '1' and rx_v = '1' then
                         if rx_b = RX_HEADER_H1 then
@@ -286,6 +289,7 @@ begin
                     ps <= SEND_H1;
 
                 when SEND_H1 =>
+                    tx_enabled <= '1';  -- 啟用發送
                     led_send_header_latch <= '1';  -- 設置 latch
                     tx_b <= TX_HEADER_H1;
                     if tx_busy = '0' then
@@ -372,6 +376,7 @@ begin
                                 if out_idx = FFT_N-1 then
                                     -- 發送完成
                                     data_ready <= '0';
+                                    tx_enabled <= '0';  -- 禁止發送
                                     led_send_header_latch <= '0';
                                     led_send_payload_latch <= '0';
                                     ps <= WAIT_H1;
