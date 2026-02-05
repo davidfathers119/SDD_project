@@ -34,8 +34,8 @@ architecture rtl of fft_system_top is
     signal tx_rdy  : std_logic;
     
     -- UART 實際連接信號（加入 system_ready 控制）
-    signal uart_tx_b : std_logic_vector(7 downto 0);
-    signal uart_tx_v : std_logic;
+    signal uart_tx_b : std_logic_vector(7 downto 0) := (others => '0');
+    signal uart_tx_v : std_logic := '0';
     signal uart_rst_n : std_logic;  -- 受控的 UART reset
 
     -- packet parser
@@ -124,10 +124,6 @@ begin
             tx_ready => tx_rdy
         );
     
-    -- 只有系統準備好且明確在發送狀態才允許發送
-    uart_tx_b <= tx_b when (system_ready = '1' and tx_enabled = '1') else (others => '0');
-    uart_tx_v <= tx_v when (system_ready = '1' and tx_enabled = '1') else '0';
-
     u_fft: entity work.fft_core_stub
         generic map(
             FFT_SIZE => FFT_N,
@@ -203,6 +199,8 @@ begin
             data_ready <= '0';  -- reset 時標記資料未準備好
             tx_busy <= '0';  -- reset 時清除發送忙碌標誌
             tx_enabled <= '0';  -- reset 時禁止發送
+            uart_tx_b <= (others => '0');  -- reset UART TX buffer
+            uart_tx_v <= '0';  -- reset UART TX valid
             led_send_header_latch <= '0';
             led_send_payload_latch <= '0';
         elsif rising_edge(clk25) then
@@ -211,6 +209,14 @@ begin
             fft_in_valid <= '0';
             tx_v <= '0';  -- 預設不發送，由 FSM 各狀態控制
             tx_b <= (others => '0');  -- 預設清空發送buffer，避免latch推斷
+            -- 寄存器化UART TX接口（只在system_ready且tx_enabled時轉發）
+            if system_ready = '1' and tx_enabled = '1' then
+                uart_tx_b <= tx_b;
+                uart_tx_v <= tx_v;
+            else
+                uart_tx_b <= (others => '0');
+                uart_tx_v <= '0';
+            end if;
 
             case ps is
                 when WAIT_H1 =>
