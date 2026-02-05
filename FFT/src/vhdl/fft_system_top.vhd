@@ -285,29 +285,32 @@ begin
 
                 when SEND_H1 =>
                     led_send_header_latch <= '1';  -- 設置 latch
+                    -- 確保 tx_b 已清除舊值
+                    tx_b <= TX_HEADER_H1;
                     if tx_rdy = '1' and data_ready = '1' then
-                        tx_b <= TX_HEADER_H1;
                         tx_v <= '1';
                         ps <= SEND_H2;
                     end if;
 
                 when SEND_H2 =>
+                    -- 提前設置下一個要發送的值
+                    tx_b <= TX_HEADER_H2;
+                    -- 等待 UART 準備好（確保上一個 byte 已發送）
                     if tx_rdy = '1' then
-                        tx_b <= TX_HEADER_H2;
                         tx_v <= '1';
                         ps <= SEND_LEN0;
                     end if;
 
                 when SEND_LEN0 =>
+                    tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                     if tx_rdy = '1' then
-                        tx_b <= std_logic_vector(FFT_SIZE_U16(7 downto 0));
                         tx_v <= '1';
                         ps <= SEND_LEN1;
                     end if;
 
                 when SEND_LEN1 =>
+                    tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                     if tx_rdy = '1' then
-                        tx_b <= std_logic_vector(FFT_SIZE_U16(15 downto 8));
                         tx_v <= '1';
                         out_idx <= 0;
                         out_byte_sel <= 0;
