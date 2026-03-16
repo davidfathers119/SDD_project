@@ -1,0 +1,84 @@
+# VHDL/FPGA 專案 .gitignore
+
+# Xilinx Vivado
+*.jou
+*.log
+*.str
+*.zip
+.Xil/
+vivado*.backup.*
+*.cache/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+*.srcs/synthesis/
+*.srcs/sim_*/
+*.data/
+webtalk*.jou
+webtalk*.log
+
+# Intel Quartus
+*.qws
+*.rpt
+*.smsg
+*.summary
+*.done
+*.pin
+*.sof
+*.pof
+*.qar
+db/
+incremental_db/
+output_files/
+simulation/
+greybox_tmp/
+timing/
+qdb/
+
+# ModelSim
+*.mti
+*.mpf
+work/
+transcript
+vsim.wlf
+wlf*
+
+# GHDL
+*.o
+*.cf
+e~*.vhd
+
+# 編譯輸出
+*.vcd
+*.ghw
+*.fst
+
+# 作業系統
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 編輯器
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# 暫存檔
+*.bak
+*.tmp
+*.temp
+
+# 文件
+*.pdf
+*.doc
+*.docx
+
+# .NET / Visual Studio
+bin/
+obj/
+.vs/
+*.user
+*.suo
